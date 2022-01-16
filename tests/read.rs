@@ -44,7 +44,10 @@ fn read_different_format_epubs() {
         println!("Evaluating: {:#?}", path);
         let doc = EpubDoc::new(path.unwrap().path()).unwrap();
 
-        assert!(doc.metadata.get("description").unwrap()[0].contains("Multiple encoding tests"));
+        assert!(doc
+            .mdata("description")
+            .unwrap()
+            .contains("Multiple encoding tests"));
     }
 }
 
@@ -58,8 +61,8 @@ fn bad_epub() {
     let doc = doc.unwrap();
     if let Some(titles) = doc.metadata.get("title") {
         assert_eq!(
-            titles,
-            &vec!["Metamorphosis ".to_string(), "Metamorphosis2 ".to_string()]
+            titles.iter().map(|i| i.content.clone()).collect::<Vec<_>>(),
+            vec!["Metamorphosis ".to_string(), "Metamorphosis2 ".to_string()]
         );
         println!("Book title: {:#?}", titles);
     } else {

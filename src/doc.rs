@@ -4,17 +4,19 @@
 //! chapters, etc.
 
 use anyhow::{anyhow, Error};
-use xmlutils::XMLError;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{Read, Seek};
+use std::iter::FromIterator;
 use std::path::{Component, Path, PathBuf};
+use xmlutils::XMLError;
 
 use crate::archive::EpubArchive;
 
 use crate::xmlutils;
+use crate::xmlutils::XMLNode;
 
 /// Struct that represent a navigation point in a table of content
 #[derive(Eq)]
@@ -47,6 +49,32 @@ impl PartialEq for NavPoint {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MetadataNode {
+    pub content: String,
+    pub attributes: HashMap<String, String>,
+}
+
+impl MetadataNode {
+    pub fn from_content(content: String) -> MetadataNode {
+        MetadataNode {
+            content,
+            attributes: HashMap::new(),
+        }
+    }
+
+    pub fn from_attr(content: String, attr: &XMLNode) -> MetadataNode {
+        MetadataNode {
+            content,
+            attributes: HashMap::from_iter(
+                attr.attrs
+                    .iter()
+                    .map(|k| (k.name.local_name.to_string(), k.value.clone())),
+            ),
+        }
+    }
+}
+
 /// Struct to control the epub document
 pub struct EpubDoc<R: Read + Seek> {
     /// the zip archive
@@ -69,13 +97,14 @@ pub struct EpubDoc<R: Read + Seek> {
     /// #Examples
     ///
     /// ```
-    /// # use epub::doc::EpubDoc;
+    /// # use epub::doc::{EpubDoc, MetadataNode};
     /// # let doc = EpubDoc::new("test.epub");
     /// # let doc = doc.unwrap();
     /// let title = doc.metadata.get("title");
-    /// assert_eq!(title.unwrap(), &vec!["Todo es mío".to_string()]);
+    ///
+    /// assert_eq!(title.unwrap(), &vec![MetadataNode::from_content("Todo es mío".to_string())]);
     /// ```
-    pub metadata: HashMap<String, Vec<String>>,
+    pub metadata: HashMap<String, Vec<MetadataNode>>,
 
     /// root file base path
     pub root_base: PathBuf,
@@ -168,7 +197,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         Ok(doc)
     }
 
-    /// Returns the first metadata found with this name.
+    /// Returns the content of the first metadata found with this name.
     ///
     /// #Examples
     ///
@@ -179,6 +208,23 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// let title = doc.mdata("title");
     /// assert_eq!(title.unwrap(), "Todo es mío");
     pub fn mdata(&self, name: &str) -> Option<String> {
+        match self.metadata.get(name) {
+            Some(v) => v.get(0).map(|m| m.content.clone()),
+            None => None,
+        }
+    }
+
+    /// Returns the first full metadata found with this name.
+    ///
+    /// #Examples
+    ///
+    /// ```
+    /// # use epub::doc::{EpubDoc, MetadataNode};
+    /// # let doc = EpubDoc::new("test.epub");
+    /// # let doc = doc.unwrap();
+    /// let title = doc.mdata_full("title");
+    /// assert_eq!(title.unwrap().content, "Todo es mío");
+    pub fn mdata_full(&self, name: &str) -> Option<MetadataNode> {
         match self.metadata.get(name) {
             Some(v) => v.get(0).cloned(),
             None => None,
@@ -618,12 +664,14 @@ impl<R: Read + Seek> EpubDoc<R> {
     // file. Failing to convert to unix-style on Windows causes the
     // ZipArchive not to find the file.
     fn convert_path_separators(&self, href: &str) -> PathBuf {
-        let path = self.root_base.join(href.split("/").collect::<PathBuf>());
+        let path = self.root_base.join(href.split('/').collect::<PathBuf>());
+
         if cfg!(windows) {
             let path = path.as_path().display().to_string().replace("\\", "/");
-            return PathBuf::from(path);
+            PathBuf::from(path)
+        } else {
+            path
         }
-        PathBuf::from(path)
     }
 
     fn fill_resources(&mut self) -> Result<(), Error> {
@@ -636,29 +684,38 @@ impl<R: Read + Seek> EpubDoc<R> {
             let item = r.borrow();
             let _ = self.insert_resource(&item);
         }
+
         // items from spine
         let spine = root.borrow().find("spine")?;
         for r in spine.borrow().childs.iter() {
             let item = r.borrow();
             let _ = self.insert_spine(&item);
         }
+
         // toc.ncx
         if let Ok(toc) = spine.borrow().get_attr("toc") {
             let _ = self.fill_toc(&toc);
         }
+
         // metadata
         let metadata = root.borrow().find("metadata")?;
         for r in metadata.borrow().childs.iter() {
             let item = r.borrow();
             if item.name.local_name == "meta" {
                 if let (Ok(k), Ok(v)) = (item.get_attr("name"), item.get_attr("content")) {
-                    self.metadata.entry(k).or_insert(vec![]).push(v);
+                    self.metadata
+                        .entry(k)
+                        .or_insert(vec![])
+                        .push(MetadataNode::from_attr(v, &item));
                 } else if let Ok(k) = item.get_attr("property") {
                     let v = match item.text {
                         Some(ref x) => x.to_string(),
                         None => String::from(""),
                     };
-                    self.metadata.entry(k).or_insert(vec![]).push(v);
+
+                    let node = MetadataNode::from_attr(v, &item);
+
+                    self.metadata.entry(k).or_insert(vec![]).push(node);
                 }
             } else {
                 let k = &item.name.local_name;
@@ -676,13 +733,13 @@ impl<R: Read + Seek> EpubDoc<R> {
                         }
                     }
                 }
-                if self.metadata.contains_key(k) {
-                    if let Some(arr) = self.metadata.get_mut(k) {
-                        arr.push(v);
-                    }
-                } else {
-                    self.metadata.insert(k.to_string(), vec![v]);
-                }
+
+                let node = MetadataNode::from_attr(v, &item);
+
+                self.metadata
+                    .entry(k.to_string())
+                    .or_insert(vec![])
+                    .push(node);
             }
         }
         Ok(())
@@ -693,12 +750,11 @@ impl<R: Read + Seek> EpubDoc<R> {
         let href = item.get_attr("href")?;
         let mtype = item.get_attr("media-type")?;
         let path = self.convert_path_separators(&href);
-        self.resources
-            .insert(id, (path, mtype));
+        self.resources.insert(id, (path, mtype));
         Ok(())
     }
 
-    fn insert_spine(&mut self, item:&xmlutils::XMLNode) -> Result<(), XMLError> {
+    fn insert_spine(&mut self, item: &xmlutils::XMLNode) -> Result<(), XMLError> {
         let id = item.get_attr("idref")?;
         self.spine.push(id);
         Ok(())
