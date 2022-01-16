@@ -58,8 +58,9 @@ impl<R: Read + Seek> EpubArchive<R> {
     ///
     /// Returns an error if the name doesn't exists in the zip archive.
     pub fn get_entry<P: AsRef<Path>>(&mut self, name: P) -> Result<Vec<u8>, Error> {
-        let mut entry: Vec<u8> = vec![];
+        let mut entry: Vec<u8> = Vec::new();
         let name = name.as_ref().display().to_string();
+
         match self.zip.by_name(&name) {
             Ok(mut zipfile) => {
                 zipfile.read_to_end(&mut entry)?;

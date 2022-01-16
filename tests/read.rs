@@ -33,6 +33,22 @@ fn read_doc() {
 }
 
 #[test]
+fn read_different_format_epubs() {
+    // Read all the epubs in the /epubfiles directory.
+    // These are formatted with UTF16/UTF8, borrowed from: https://github.com/tkanai/epub-testfiles
+    let files = "tests/docs/epubfiles";
+
+    let paths = std::fs::read_dir(files).unwrap();
+
+    for path in paths {
+        println!("Evaluating: {:#?}", path);
+        let doc = EpubDoc::new(path.unwrap().path()).unwrap();
+
+        assert!(doc.metadata.get("description").unwrap()[0].contains("Multiple encoding tests"));
+    }
+}
+
+#[test]
 fn bad_epub() {
     //book2.epub has a opf encoded in UTF-16
     //It also has malformed toc, manifest and guide entries, as well as multiple metadata entries
