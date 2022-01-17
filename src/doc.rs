@@ -10,15 +10,14 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
-use xmlutils::XMLError;
 
 use crate::archive::EpubArchive;
 use crate::parsers::{EpubMetadata, EpubParser};
 
 use crate::parsers::v2::EpubV2Parser;
 use crate::parsers::v3::EpubV3Parser;
+use crate::xmlutils;
 use crate::xmlutils::XMLNode;
-use crate::{utils, xmlutils};
 
 /// Struct that represent a navigation point in a table of content
 #[derive(Debug, Eq, Clone)]
@@ -185,6 +184,7 @@ impl<R: Read + Seek> EpubDoc<R> {
                 resources,
                 toc: vec![],
                 metadata: Default::default(),
+                cover_id: None,
                 unique_identifier: None,
             },
         };
@@ -245,20 +245,11 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Returns an error if the cover path can't be found.
-    pub fn get_cover_id(&self) -> Result<&str, Error> {
-        match self.mdata("cover") {
-            Some(id) => Ok(id),
-            None => {
-                // In the Epub 3.2 specification an `item` element in the `manifest` can have the `cover-image` property.
-                for (k, item) in self.context.resources.iter() {
-                    if matches!(&item.property, Some(property) if property == "cover-image") {
-                        return Ok(k);
-                    }
-                }
-
-                Err(anyhow!("Cover not found"))
-            }
-        }
+    pub fn get_cover_id(&self) -> anyhow::Result<&str> {
+        self.context
+            .cover_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("Cover not found"))
     }
 
     /// Returns the cover as Vec<u8>
@@ -287,6 +278,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns an error if the cover can't be found.
     pub fn get_cover(&mut self) -> Result<Vec<u8>, Error> {
         let cover_id = self.get_cover_id()?.to_string();
+
         let cover_data = self.get_resource(&cover_id)?;
         Ok(cover_data)
     }
@@ -644,14 +636,14 @@ impl<R: Read + Seek> EpubDoc<R> {
     }
 
     /// Function to convert a resource path to a chapter number in the spine
-    /// If the resourse isn't in the spine list, None will be returned
+    /// If the resource isn't in the spine list, None will be returned
     ///
     /// This method is useful to convert a toc NavPoint content to a chapter number
     /// to be able to navigate easily
-    pub fn resource_uri_to_chapter(&self, uri: &PathBuf) -> Option<usize> {
-        for (k, item) in self.context.resources.iter() {
-            if &item.path == uri {
-                return self.resource_id_to_chapter(&k);
+    pub fn resource_uri_to_chapter(&self, uri: impl AsRef<Path>) -> Option<usize> {
+        for (key, item) in self.context.resources.iter() {
+            if item.path == uri.as_ref() {
+                return self.resource_id_to_chapter(key);
             }
         }
 
@@ -727,7 +719,7 @@ fn build_epub_uri<P: AsRef<Path>>(path: P, append: &str) -> String {
 
     // If on Windows, replace all Windows path separators with Unix path separators
     let path = if cfg!(windows) {
-        cpath.display().to_string().replace("\\", "/")
+        cpath.display().to_string().replace('\\', "/")
     } else {
         cpath.display().to_string()
     };

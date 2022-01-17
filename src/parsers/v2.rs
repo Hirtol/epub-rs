@@ -36,7 +36,7 @@ impl EpubParser for EpubV2Parser {
 
         // toc.ncx
         if let Ok(toc) = spine.borrow().get_attr("toc") {
-            let _ = Self::fill_toc(epub, root_base, archive, &toc);
+            let _ = Self::fill_toc(epub, root_base, archive, toc);
         }
 
         // metadata
@@ -86,6 +86,15 @@ impl EpubParser for EpubV2Parser {
                     .or_insert(vec![])
                     .push(node);
             }
+        }
+
+        // Cover
+        if epub.metadata.contains_key("cover") {
+            epub.cover_id = epub
+                .metadata
+                .get("cover")
+                .and_then(|i| i.get(0))
+                .map(|i| i.content.to_string());
         }
 
         Ok(())
@@ -138,7 +147,7 @@ impl EpubV2Parser {
             let play_order = item
                 .get_attr("playOrder")
                 .ok()
-                .and_then(|n| usize::from_str_radix(&n, 10).ok());
+                .and_then(|n| n.parse::<usize>().ok());
             let content = match item.find("content") {
                 Ok(c) => c.borrow().get_attr("src").ok().map(|p| root_base.join(p)),
                 _ => None,

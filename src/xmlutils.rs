@@ -85,7 +85,7 @@ impl<'a> XMLReader<'a> {
                         let current = parents.last();
                         if let Some(c) = current {
                             c.borrow_mut().childs.push(arnode.clone());
-                            arnode.borrow_mut().parent = Some(Rc::downgrade(&c));
+                            arnode.borrow_mut().parent = Some(Rc::downgrade(c));
                         }
                     }
                     parents.push(arnode.clone());
@@ -277,8 +277,7 @@ where
                     {
                         for i in 0..attributes.len() {
                             let mut attr = attributes[i].to_owned();
-                            let repl =
-                                closure(&name.local_name, &attr.name.local_name, &attr.value);
+                            let repl = closure(name.local_name, &attr.name.local_name, &attr.value);
                             attr.value = repl;
                             attrs.push(attr);
                         }

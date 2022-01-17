@@ -6,8 +6,7 @@ use crate::parsers::{EpubMetadata, EpubParser, RootXml};
 use crate::xmlutils;
 use anyhow::anyhow;
 use std::io::{Read, Seek};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::path::Path;
 
 pub struct EpubV3Parser;
 
@@ -18,6 +17,17 @@ impl EpubParser for EpubV3Parser {
         xml: &RootXml,
         archive: &mut EpubArchive<R>,
     ) -> anyhow::Result<()> {
+        // Cover
+        if epub.cover_id.is_none() {
+            // In the Epub 3.2 specification an `item` element in the `manifest` can have the `cover-image` property.
+            for (key, item) in epub.resources.iter() {
+                if matches!(&item.property, Some(property) if property == "cover-image") {
+                    epub.cover_id = Some(key.clone());
+                    break;
+                }
+            }
+        }
+
         // ToC, only done if the book didn't contain a V2 fallback
         if epub.toc.is_empty() {
             // toc.ncx is not in spine, thus we need to find it in manifest
@@ -87,10 +97,7 @@ fn get_navpoints(root_base: impl AsRef<Path>, parent: &xmlutils::XMLNode) -> Vec
         let item = link.borrow();
 
         let label = item.text.clone();
-        let content = item
-            .get_attr("href")
-            .ok()
-            .and_then(|i| PathBuf::from_str(i).ok());
+        let content = item.get_attr("href").ok().map(|i| root_base.join(i));
 
         if let (Some(label), Some(content)) = (label, content) {
             let navpoint = NavPoint {

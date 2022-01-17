@@ -10,7 +10,7 @@ pub fn convert_path_separators(root_base: impl AsRef<Path>, href: &str) -> PathB
         .join(href.split('/').collect::<PathBuf>());
 
     if cfg!(windows) {
-        let path = path.as_path().display().to_string().replace("\\", "/");
+        let path = path.as_path().display().to_string().replace('\\', "/");
         PathBuf::from(path)
     } else {
         path

@@ -7,7 +7,7 @@
 use crate::archive::EpubArchive;
 use crate::doc::{MetadataNode, NavPoint, ResourceItem};
 use crate::xmlutils::{XMLError, XMLNode};
-use crate::{doc, utils, xmlutils};
+use crate::{utils, xmlutils};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
@@ -57,6 +57,9 @@ pub struct EpubMetadata {
     /// ```
     pub metadata: HashMap<String, Vec<MetadataNode>>,
 
+    /// Cover Id
+    pub cover_id: Option<String>,
+
     /// unique identifier
     pub unique_identifier: Option<String>,
 }
@@ -70,7 +73,7 @@ impl EpubMetadata {
         let id = item.get_attr("id")?;
         let href = item.get_attr("href")?;
         let mtype = item.get_attr("media-type")?;
-        let path = utils::convert_path_separators(root_base, &href);
+        let path = utils::convert_path_separators(root_base, href);
         self.resources.insert(
             id.to_string(),
             ResourceItem {
