@@ -25,11 +25,11 @@ impl EpubArchive<BufReader<File>> {
     ///
     /// Returns an error if the zip is broken or if the file doesn't
     /// exists.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<EpubArchive<BufReader<File>>, Error> {
-        let path = path.as_ref();
-        let file = File::open(path)?;
+    pub fn new(path: impl Into<PathBuf>) -> Result<EpubArchive<BufReader<File>>, Error> {
+        let path = path.into();
+        let file = File::open(&path)?;
         let mut archive = EpubArchive::from_reader(BufReader::new(file))?;
-        archive.path = path.to_path_buf();
+        archive.path = path;
         Ok(archive)
     }
 }
@@ -43,7 +43,7 @@ impl<R: Read + Seek> EpubArchive<R> {
     pub fn from_reader(reader: R) -> Result<EpubArchive<R>, Error> {
         let zip = zip::ZipArchive::new(reader)?;
 
-        let files:Vec<String> = zip.file_names().map(|f| f.to_string()).collect();
+        let files: Vec<String> = zip.file_names().map(|f| f.to_string()).collect();
 
         Ok(EpubArchive {
             zip,
