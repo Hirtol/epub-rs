@@ -10,19 +10,19 @@ fn doc_open() {
     assert_eq!(Path::new("OEBPS"), doc.root_base);
     assert_eq!(Path::new("OEBPS/content.opf"), doc.root_file);
 
-    assert_eq!(23, doc.resources.len());
+    assert_eq!(23, doc.context.resources.len());
     {
-        let tpage = doc.resources.get("titlepage.xhtml");
+        let tpage = doc.context.resources.get("titlepage.xhtml");
         assert_eq!(tpage.unwrap().path, Path::new("OEBPS/Text/titlepage.xhtml"));
     }
 
     {
-        assert_eq!(17, doc.spine.len());
-        assert_eq!("titlepage.xhtml", doc.spine[0]);
+        assert_eq!(17, doc.context.spine.len());
+        assert_eq!("titlepage.xhtml", doc.context.spine[0]);
     }
 
     {
-        let unique_identifier = doc.unique_identifier.clone();
+        let unique_identifier = doc.context.unique_identifier.clone();
         assert_eq!(
             unique_identifier.unwrap(),
             "urn:uuid:09132750-3601-4d19-b3a4-55fdf8639849"
@@ -53,7 +53,7 @@ fn doc_open() {
     }
 
     {
-        let unique_identifier = doc2.unique_identifier.clone();
+        let unique_identifier = doc2.context.unique_identifier.clone();
         assert_eq!(
             "http://metamorphosiskafka.pressbooks.com",
             unique_identifier.unwrap()
@@ -72,8 +72,8 @@ fn toc_test() {
     assert!(doc.is_ok());
     let doc = doc.unwrap();
 
-    assert!(doc.toc.len() > 0);
-    for nav in doc.toc.iter() {
+    assert!(!doc.context.toc.is_empty());
+    for nav in doc.context.toc.iter() {
         let chapter = doc.resource_uri_to_chapter(&nav.content);
         assert!(chapter.is_some());
         assert_eq!(nav.play_order, chapter.unwrap());

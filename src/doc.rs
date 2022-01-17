@@ -13,12 +13,15 @@ use std::path::{Component, Path, PathBuf};
 use xmlutils::XMLError;
 
 use crate::archive::EpubArchive;
+use crate::parsers::{EpubMetadata, EpubParser};
 
-use crate::xmlutils;
+use crate::parsers::v2::EpubV2Parser;
+use crate::parsers::v3::EpubV3Parser;
 use crate::xmlutils::XMLNode;
+use crate::{utils, xmlutils};
 
 /// Struct that represent a navigation point in a table of content
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct NavPoint {
     /// the title of this navpoint
     pub label: String,
@@ -97,29 +100,6 @@ pub struct EpubDoc<R: Read + Seek> {
     /// The current chapter, is an spine index
     current: usize,
 
-    /// epub spine ids
-    pub spine: Vec<String>,
-
-    /// resource id -> (path, mime)
-    pub resources: HashMap<String, ResourceItem>,
-
-    /// table of content, list of `NavPoint` in the toc.ncx
-    pub toc: Vec<NavPoint>,
-
-    /// The epub metadata stored as key -> value
-    ///
-    /// #Examples
-    ///
-    /// ```
-    /// # use epub::doc::{EpubDoc, MetadataNode};
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let doc = doc.unwrap();
-    /// let title = doc.metadata.get("title");
-    ///
-    /// assert_eq!(title.unwrap(), &vec![MetadataNode::from_content("Todo es mío".to_string())]);
-    /// ```
-    pub metadata: HashMap<String, Vec<MetadataNode>>,
-
     /// root file base path
     pub root_base: PathBuf,
 
@@ -129,8 +109,7 @@ pub struct EpubDoc<R: Read + Seek> {
     /// Custom css list to inject in every xhtml file
     pub extra_css: Vec<String>,
 
-    /// unique identifier
-    pub unique_identifier: Option<String>,
+    pub context: EpubMetadata,
 }
 
 impl EpubDoc<BufReader<File>> {
@@ -197,15 +176,17 @@ impl<R: Read + Seek> EpubDoc<R> {
         let base_path = root_file.parent().expect("All files have a parent");
         let mut doc = EpubDoc {
             archive,
-            spine,
-            toc: vec![],
-            resources,
-            metadata: HashMap::new(),
             root_file: root_file.clone(),
             root_base: base_path.to_path_buf(),
             current: 0,
             extra_css: vec![],
-            unique_identifier: None,
+            context: EpubMetadata {
+                spine,
+                resources,
+                toc: vec![],
+                metadata: Default::default(),
+                unique_identifier: None,
+            },
         };
         doc.fill_resources()?;
         Ok(doc)
@@ -222,7 +203,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// let title = doc.mdata("title");
     /// assert_eq!(title.unwrap(), "Todo es mío");
     pub fn mdata(&self, name: &str) -> Option<&str> {
-        match self.metadata.get(name) {
+        match self.context.metadata.get(name) {
             Some(v) => v.get(0).map(|m| m.content.as_str()),
             None => None,
         }
@@ -239,7 +220,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// let title = doc.mdata_full("title");
     /// assert_eq!(title.unwrap().content, "Todo es mío");
     pub fn mdata_full(&self, name: &str) -> Option<&MetadataNode> {
-        match self.metadata.get(name) {
+        match self.context.metadata.get(name) {
             Some(v) => v.get(0),
             None => None,
         }
@@ -269,7 +250,7 @@ impl<R: Read + Seek> EpubDoc<R> {
             Some(id) => Ok(id),
             None => {
                 // In the Epub 3.2 specification an `item` element in the `manifest` can have the `cover-image` property.
-                for (k, item) in self.resources.iter() {
+                for (k, item) in self.context.resources.iter() {
                     if matches!(&item.property, Some(property) if property == "cover-image") {
                         return Ok(k);
                     }
@@ -314,7 +295,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// https://www.w3.org/publishing/epub3/epub-packages.html#sec-metadata-elem-identifiers-pid
     pub fn get_release_identifier(&self) -> Option<String> {
         match (
-            self.unique_identifier.as_ref(),
+            self.context.unique_identifier.as_ref(),
             self.mdata("dcterms:modified"),
         ) {
             (Some(unique_identifier), Some(modified)) => {
@@ -340,7 +321,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Returns an error if the id doesn't exists in the epub
     pub fn get_resource(&mut self, id: &str) -> Result<Vec<u8>, Error> {
-        let path = match self.resources.get(id) {
+        let path = match self.context.resources.get(id) {
             Some(s) => s.path.clone(),
             None => return Err(anyhow!("id not found")),
         };
@@ -364,7 +345,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Returns an error if the id doesn't exists in the epub
     pub fn get_resource_str(&mut self, id: &str) -> Result<String, Error> {
-        let path = match self.resources.get(id) {
+        let path = match self.context.resources.get(id) {
             Some(s) => s.path.clone(),
             None => return Err(anyhow!("id not found")),
         };
@@ -387,7 +368,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Fails if the resource can't be found.
     pub fn get_resource_mime(&self, id: &str) -> Result<String, Error> {
-        if let Some(item) = self.resources.get(id) {
+        if let Some(item) = self.context.resources.get(id) {
             return Ok(item.mime.clone());
         }
         Err(anyhow!("id not found"))
@@ -411,7 +392,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     pub fn get_resource_mime_by_path<P: AsRef<Path>>(&self, path: P) -> Result<String, Error> {
         let path = path.as_ref();
 
-        for (_, v) in self.resources.iter() {
+        for (_, v) in self.context.resources.iter() {
             if v.path == path {
                 return Ok(v.mime.clone());
             }
@@ -515,7 +496,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     pub fn get_current_path(&self) -> Result<PathBuf, Error> {
         let current_id = self.get_current_id()?;
 
-        match self.resources.get(&current_id) {
+        match self.context.resources.get(&current_id) {
             Some(item) => Ok(item.path.clone()),
             None => Err(anyhow!("Current not found")),
         }
@@ -533,7 +514,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// assert_eq!("titlepage.xhtml", id.unwrap());
     /// ```
     pub fn get_current_id(&self) -> Result<String, Error> {
-        let current_id = self.spine.get(self.current);
+        let current_id = self.context.spine.get(self.current);
         match current_id {
             Some(id) => Ok(id.to_string()),
             None => Err(anyhow!("current is broken")),
@@ -551,7 +532,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// doc.go_next();
     /// assert_eq!("000.xhtml", doc.get_current_id().unwrap());
     ///
-    /// let len = doc.spine.len();
+    /// let len = doc.context.spine.len();
     /// for i in 1..len {
     ///     doc.go_next();
     /// }
@@ -562,7 +543,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// If the page is the last, will not change and an error will be returned
     pub fn go_next(&mut self) -> Result<(), Error> {
-        if self.current + 1 >= self.spine.len() {
+        if self.current + 1 >= self.context.spine.len() {
             return Err(anyhow!("last page"));
         }
         self.current += 1;
@@ -608,7 +589,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// assert_eq!(17, doc.get_num_pages());
     /// ```
     pub fn get_num_pages(&self) -> usize {
-        self.spine.len()
+        self.context.spine.len()
     }
 
     /// Returns the current chapter number, starting from 0
@@ -635,7 +616,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// If the page isn't valid, will not change and an error will be returned
     pub fn set_current_page(&mut self, n: usize) -> Result<(), Error> {
-        if n >= self.spine.len() {
+        if n >= self.context.spine.len() {
             return Err(anyhow!("page not valid"));
         }
         self.current = n;
@@ -668,7 +649,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// This method is useful to convert a toc NavPoint content to a chapter number
     /// to be able to navigate easily
     pub fn resource_uri_to_chapter(&self, uri: &PathBuf) -> Option<usize> {
-        for (k, item) in self.resources.iter() {
+        for (k, item) in self.context.resources.iter() {
             if &item.path == uri {
                 return self.resource_id_to_chapter(&k);
             }
@@ -678,197 +659,30 @@ impl<R: Read + Seek> EpubDoc<R> {
     }
 
     /// Function to convert a resource id to a chapter number in the spine
-    /// If the resourse isn't in the spine list, None will be returned
+    /// If the resource isn't in the spine list, None will be returned
     pub fn resource_id_to_chapter(&self, uri: &str) -> Option<usize> {
-        self.spine.iter().position(|item| item == uri)
-    }
-
-    // Forcibly converts separators in a filepath to unix separators to
-    // to ensure that ZipArchive's by_name method will retrieve the proper
-    // file. Failing to convert to unix-style on Windows causes the
-    // ZipArchive not to find the file.
-    fn convert_path_separators(&self, href: &str) -> PathBuf {
-        let path = self.root_base.join(href.split('/').collect::<PathBuf>());
-
-        if cfg!(windows) {
-            let path = path.as_path().display().to_string().replace("\\", "/");
-            PathBuf::from(path)
-        } else {
-            path
-        }
+        self.context.spine.iter().position(|item| item == uri)
     }
 
     fn fill_resources(&mut self) -> Result<(), Error> {
         let container = self.archive.get_entry(&self.root_file)?;
         let root = xmlutils::XMLReader::parse(container.as_slice())?;
-        let unique_identifier_id = &root.borrow().get_attr("unique-identifier").ok();
+        let epub_version = root.borrow().get_attr("version")?.to_string();
 
-        // resources from manifest
-        let manifest = root.borrow().find("manifest")?;
-        for r in manifest.borrow().childs.iter() {
-            let item = r.borrow();
-            let _ = self.insert_resource(&item);
-        }
-
-        // items from spine
-        let spine = root.borrow().find("spine")?;
-        for r in spine.borrow().childs.iter() {
-            let item = r.borrow();
-            let _ = self.insert_spine(&item);
-        }
-
-        // toc.ncx
-        if let Ok(toc) = spine.borrow().get_attr("toc") {
-            let _ = self.fill_toc(&toc);
-        } else {
-            // toc.ncx is not in spine, assuming Epub v3.2 so we need to find it in manifest
-            let mut nav = None;
-            // Find nav item, see: https://www.w3.org/publishing/epub3/epub-packages.html#sec-nav
-            for (k, item) in self.resources.iter() {
-                if matches!(&item.property, Some(property) if property == "nav") {
-                    nav = Some(k.clone());
-                    break;
-                }
+        match epub_version.as_str() {
+            "2.0" => {
+                // Parse with only the V2 parser
+                EpubV2Parser::parse(&mut self.context, &self.root_base, &root, &mut self.archive)?;
             }
-
-            if let Some(nav) = nav {
-                let _ = self.fill_toc(&nav);
+            _ => {
+                // Always assume it's a V3 epub
+                // Parse with the V2 parser, followed by the V3 parser
+                EpubV2Parser::parse(&mut self.context, &self.root_base, &root, &mut self.archive)?;
+                EpubV3Parser::parse(&mut self.context, &self.root_base, &root, &mut self.archive)?;
             }
         }
-
-        // metadata
-        let metadata = root.borrow().find("metadata")?;
-        for r in metadata.borrow().childs.iter() {
-            let item = r.borrow();
-            if item.name.local_name == "meta" {
-                if let (Ok(k), Ok(v)) = (item.get_attr("name"), item.get_attr("content")) {
-                    self.metadata
-                        .entry(k)
-                        .or_insert(vec![])
-                        .push(MetadataNode::from_attr(v, &item));
-                } else if let Ok(k) = item.get_attr("property") {
-                    let v = match item.text {
-                        Some(ref x) => x.to_string(),
-                        None => String::from(""),
-                    };
-
-                    let node = MetadataNode::from_attr(v, &item);
-
-                    self.metadata.entry(k).or_insert(vec![]).push(node);
-                }
-            } else {
-                let k = &item.name.local_name;
-                let v = match item.text {
-                    Some(ref x) => x.to_string(),
-                    None => String::from(""),
-                };
-                if k == "identifier"
-                    && self.unique_identifier.is_none()
-                    && unique_identifier_id.is_some()
-                {
-                    if let Ok(id) = item.get_attr("id") {
-                        if &id == unique_identifier_id.as_ref().unwrap() {
-                            self.unique_identifier = Some(v.to_string());
-                        }
-                    }
-                }
-
-                let node = MetadataNode::from_attr(v, &item);
-
-                self.metadata
-                    .entry(k.to_string())
-                    .or_insert(vec![])
-                    .push(node);
-            }
-        }
-        Ok(())
-    }
-
-    fn insert_resource(&mut self, item: &xmlutils::XMLNode) -> Result<(), XMLError> {
-        let id = item.get_attr("id")?;
-        let href = item.get_attr("href")?;
-        let mtype = item.get_attr("media-type")?;
-        let path = self.convert_path_separators(&href);
-        self.resources.insert(
-            id,
-            ResourceItem {
-                path,
-                mime: mtype,
-                property: item.get_attr("properties").ok(),
-            },
-        );
-        Ok(())
-    }
-
-    fn insert_spine(&mut self, item: &xmlutils::XMLNode) -> Result<(), XMLError> {
-        let id = item.get_attr("idref")?;
-        self.spine.push(id);
-        Ok(())
-    }
-
-    fn fill_toc(&mut self, id: &str) -> Result<(), Error> {
-        let toc_res = self
-            .resources
-            .get(id)
-            .ok_or_else(|| anyhow!("No toc found"))?;
-
-        let container = self.archive.get_entry(&toc_res.path)?;
-        let root = xmlutils::XMLReader::parse(container.as_slice())?;
-
-        let mapnode = root.borrow().find("navMap")?;
-
-        self.toc.append(&mut self.get_navpoints(&mapnode.borrow()));
-        self.toc.sort();
 
         Ok(())
-    }
-
-    /// Recursively extract all navpoints from a node.
-    fn get_navpoints(&self, parent: &xmlutils::XMLNode) -> Vec<NavPoint> {
-        let mut navpoints = Vec::new();
-
-        // TODO: get docTitle
-        // TODO: parse metadata (dtb:totalPageCount, dtb:depth, dtb:maxPageNumber)
-
-        for nav in parent.childs.iter() {
-            let item = nav.borrow();
-            if item.name.local_name != "navPoint" {
-                continue;
-            }
-            let play_order = item
-                .get_attr("playOrder")
-                .ok()
-                .and_then(|n| usize::from_str_radix(&n, 10).ok());
-            let content = match item.find("content") {
-                Ok(c) => c
-                    .borrow()
-                    .get_attr("src")
-                    .ok()
-                    .map(|p| self.root_base.join(p)),
-                _ => None,
-            };
-            let label = match item.find("navLabel") {
-                Ok(l) => l
-                    .borrow()
-                    .childs
-                    .get(0)
-                    .and_then(|t| t.borrow().text.clone()),
-                _ => None,
-            };
-
-            if let (Some(o), Some(c), Some(l)) = (play_order, content, label) {
-                let navpoint = NavPoint {
-                    label: l.clone(),
-                    content: c.clone(),
-                    children: self.get_navpoints(&item),
-                    play_order: o,
-                };
-                navpoints.push(navpoint);
-            }
-        }
-
-        navpoints.sort();
-        navpoints
     }
 }
 

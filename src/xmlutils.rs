@@ -30,11 +30,12 @@ impl<'a> XMLReader<'a> {
         //If there is a UTF-8 BOM marker, ignore it
         let content_slice = if content[0..3] == [0xefu8, 0xbbu8, 0xbfu8] {
             &content[3..]
-        } else if content[0..2] == [0xfeu8, 0xffu8] || content[0..2] == [0xffu8, 0xfeu8] { //handle utf-16
+        } else if content[0..2] == [0xfeu8, 0xffu8] || content[0..2] == [0xffu8, 0xfeu8] {
+            //handle utf-16
             let (big_byte, small_byte) = if content[0] == 0xfeu8 {
-                (1,0) //big endian utf-16
+                (1, 0) //big endian utf-16
             } else {
-                (0,1) //little endian utf-16
+                (0, 1) //little endian utf-16
             };
             let content_u16: Vec<u16> = content[2..]
                 .chunks_exact(2)
@@ -52,7 +53,7 @@ impl<'a> XMLReader<'a> {
                 .add_entity("nbsp", " ")
                 .add_entity("copy", "©")
                 .add_entity("reg", "®")
-                .create_reader(content_slice)
+                .create_reader(content_slice),
         };
 
         reader.parse_xml()
@@ -176,10 +177,10 @@ pub struct XMLNode {
 }
 
 impl XMLNode {
-    pub fn get_attr(&self, name: &str) -> Result<String, XMLError> {
+    pub fn get_attr(&self, name: &str) -> Result<&str, XMLError> {
         for attr in self.attrs.iter() {
             if attr.name.local_name == name {
-                return Ok(attr.value.to_string());
+                return Ok(attr.value.as_str());
             }
         }
 

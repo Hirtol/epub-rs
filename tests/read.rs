@@ -16,10 +16,9 @@ fn read_doc() {
 
     {
         println!("resources:\n");
-        for (k, v) in doc.resources.iter() {
+        for (k, v) in doc.context.resources.iter() {
             println!("{}: {}\n * {}\n", k, v.mime, v.path.display());
         }
-        println!("");
     }
 
     while let Ok(_) = doc.go_next() {
@@ -59,7 +58,7 @@ fn bad_epub() {
     let doc = EpubDoc::new(input_file);
     assert!(doc.is_ok());
     let doc = doc.unwrap();
-    if let Some(titles) = doc.metadata.get("title") {
+    if let Some(titles) = doc.context.metadata.get("title") {
         assert_eq!(
             titles.iter().map(|i| i.content.clone()).collect::<Vec<_>>(),
             vec!["Metamorphosis ".to_string(), "Metamorphosis2 ".to_string()]
