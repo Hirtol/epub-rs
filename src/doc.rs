@@ -1,6 +1,6 @@
 //! Manages the epub doc.
 //!
-//! Provides easy methods to navigate througth the epub content, cover,
+//! Provides easy methods to navigate through the epub content, cover,
 //! chapters, etc.
 
 use anyhow::{anyhow, Error};
@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::{Read, Seek};
-use std::iter::FromIterator;
 use std::path::{Component, Path, PathBuf};
 use xmlutils::XMLError;
 
@@ -52,26 +51,34 @@ impl PartialEq for NavPoint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MetadataNode {
     pub content: String,
-    pub attributes: HashMap<String, String>,
+    pub attr: Vec<xml::attribute::OwnedAttribute>,
 }
 
 impl MetadataNode {
     pub fn from_content(content: String) -> MetadataNode {
         MetadataNode {
             content,
-            attributes: HashMap::new(),
+            attr: Vec::new(),
         }
     }
 
     pub fn from_attr(content: String, attr: &XMLNode) -> MetadataNode {
         MetadataNode {
             content,
-            attributes: HashMap::from_iter(
-                attr.attrs
-                    .iter()
-                    .map(|k| (k.name.local_name.to_string(), k.value.clone())),
-            ),
+            attr: attr.attrs.clone(),
         }
+    }
+
+    /// Find an attribute in the current node with the given `name`
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - the name of the attribute to find
+    pub fn find_attr(&self, name: &str) -> Option<&str> {
+        self.attr
+            .iter()
+            .find(|a| a.name.local_name == name)
+            .map(|a| a.value.as_str())
     }
 }
 
