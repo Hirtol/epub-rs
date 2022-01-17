@@ -49,6 +49,13 @@ impl PartialEq for NavPoint {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ResourceItem {
+    pub path: PathBuf,
+    pub mime: String,
+    pub property: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MetadataNode {
     pub content: String,
     pub attr: Vec<xml::attribute::OwnedAttribute>,
@@ -94,7 +101,7 @@ pub struct EpubDoc<R: Read + Seek> {
     pub spine: Vec<String>,
 
     /// resource id -> (path, mime)
-    pub resources: HashMap<String, (PathBuf, String)>,
+    pub resources: HashMap<String, ResourceItem>,
 
     /// table of content, list of `NavPoint` in the toc.ncx
     pub toc: Vec<NavPoint>,
@@ -214,9 +221,9 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # let doc = doc.unwrap();
     /// let title = doc.mdata("title");
     /// assert_eq!(title.unwrap(), "Todo es mío");
-    pub fn mdata(&self, name: &str) -> Option<String> {
+    pub fn mdata(&self, name: &str) -> Option<&str> {
         match self.metadata.get(name) {
-            Some(v) => v.get(0).map(|m| m.content.clone()),
+            Some(v) => v.get(0).map(|m| m.content.as_str()),
             None => None,
         }
     }
@@ -231,9 +238,9 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # let doc = doc.unwrap();
     /// let title = doc.mdata_full("title");
     /// assert_eq!(title.unwrap().content, "Todo es mío");
-    pub fn mdata_full(&self, name: &str) -> Option<MetadataNode> {
+    pub fn mdata_full(&self, name: &str) -> Option<&MetadataNode> {
         match self.metadata.get(name) {
-            Some(v) => v.get(0).cloned(),
+            Some(v) => v.get(0),
             None => None,
         }
     }
@@ -257,10 +264,19 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Returns an error if the cover path can't be found.
-    pub fn get_cover_id(&self) -> Result<String, Error> {
+    pub fn get_cover_id(&self) -> Result<&str, Error> {
         match self.mdata("cover") {
             Some(id) => Ok(id),
-            None => Err(anyhow!("Cover not found")),
+            None => {
+                // In the Epub 3.2 specification an `item` element in the `manifest` can have the `cover-image` property.
+                for (k, item) in self.resources.iter() {
+                    if matches!(&item.property, Some(property) if property == "cover-image") {
+                        return Ok(k);
+                    }
+                }
+
+                Err(anyhow!("Cover not found"))
+            }
         }
     }
 
@@ -289,7 +305,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Returns an error if the cover can't be found.
     pub fn get_cover(&mut self) -> Result<Vec<u8>, Error> {
-        let cover_id = self.get_cover_id()?;
+        let cover_id = self.get_cover_id()?.to_string();
         let cover_data = self.get_resource(&cover_id)?;
         Ok(cover_data)
     }
@@ -325,10 +341,10 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns an error if the id doesn't exists in the epub
     pub fn get_resource(&mut self, id: &str) -> Result<Vec<u8>, Error> {
         let path = match self.resources.get(id) {
-            Some(s) => s.0.clone(),
+            Some(s) => s.path.clone(),
             None => return Err(anyhow!("id not found")),
         };
-        let content = self.get_resource_by_path(&path)?;
+        let content = self.get_resource_by_path(path)?;
         Ok(content)
     }
 
@@ -349,7 +365,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns an error if the id doesn't exists in the epub
     pub fn get_resource_str(&mut self, id: &str) -> Result<String, Error> {
         let path = match self.resources.get(id) {
-            Some(s) => s.0.clone(),
+            Some(s) => s.path.clone(),
             None => return Err(anyhow!("id not found")),
         };
         let content = self.get_resource_str_by_path(path)?;
@@ -371,8 +387,8 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Fails if the resource can't be found.
     pub fn get_resource_mime(&self, id: &str) -> Result<String, Error> {
-        if let Some(&(_, ref res)) = self.resources.get(id) {
-            return Ok(res.to_string());
+        if let Some(item) = self.resources.get(id) {
+            return Ok(item.mime.clone());
         }
         Err(anyhow!("id not found"))
     }
@@ -396,8 +412,8 @@ impl<R: Read + Seek> EpubDoc<R> {
         let path = path.as_ref();
 
         for (_, v) in self.resources.iter() {
-            if v.0 == path {
-                return Ok(v.1.to_string());
+            if v.path == path {
+                return Ok(v.mime.clone());
             }
         }
         Err(anyhow!("path not found"))
@@ -498,8 +514,9 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// ```
     pub fn get_current_path(&self) -> Result<PathBuf, Error> {
         let current_id = self.get_current_id()?;
+
         match self.resources.get(&current_id) {
-            Some(&(ref p, _)) => Ok(p.clone()),
+            Some(item) => Ok(item.path.clone()),
             None => Err(anyhow!("Current not found")),
         }
     }
@@ -651,8 +668,8 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// This method is useful to convert a toc NavPoint content to a chapter number
     /// to be able to navigate easily
     pub fn resource_uri_to_chapter(&self, uri: &PathBuf) -> Option<usize> {
-        for (k, (path, _mime)) in self.resources.iter() {
-            if path == uri {
+        for (k, item) in self.resources.iter() {
+            if &item.path == uri {
                 return self.resource_id_to_chapter(&k);
             }
         }
@@ -685,6 +702,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         let container = self.archive.get_entry(&self.root_file)?;
         let root = xmlutils::XMLReader::parse(container.as_slice())?;
         let unique_identifier_id = &root.borrow().get_attr("unique-identifier").ok();
+
         // resources from manifest
         let manifest = root.borrow().find("manifest")?;
         for r in manifest.borrow().childs.iter() {
@@ -702,6 +720,20 @@ impl<R: Read + Seek> EpubDoc<R> {
         // toc.ncx
         if let Ok(toc) = spine.borrow().get_attr("toc") {
             let _ = self.fill_toc(&toc);
+        } else {
+            // toc.ncx is not in spine, assuming Epub v3.2 so we need to find it in manifest
+            let mut nav = None;
+            // Find nav item, see: https://www.w3.org/publishing/epub3/epub-packages.html#sec-nav
+            for (k, item) in self.resources.iter() {
+                if matches!(&item.property, Some(property) if property == "nav") {
+                    nav = Some(k.clone());
+                    break;
+                }
+            }
+
+            if let Some(nav) = nav {
+                let _ = self.fill_toc(&nav);
+            }
         }
 
         // metadata
@@ -757,7 +789,14 @@ impl<R: Read + Seek> EpubDoc<R> {
         let href = item.get_attr("href")?;
         let mtype = item.get_attr("media-type")?;
         let path = self.convert_path_separators(&href);
-        self.resources.insert(id, (path, mtype));
+        self.resources.insert(
+            id,
+            ResourceItem {
+                path,
+                mime: mtype,
+                property: item.get_attr("properties").ok(),
+            },
+        );
         Ok(())
     }
 
@@ -773,7 +812,7 @@ impl<R: Read + Seek> EpubDoc<R> {
             .get(id)
             .ok_or_else(|| anyhow!("No toc found"))?;
 
-        let container = self.archive.get_entry(&toc_res.0)?;
+        let container = self.archive.get_entry(&toc_res.path)?;
         let root = xmlutils::XMLReader::parse(container.as_slice())?;
 
         let mapnode = root.borrow().find("navMap")?;
