@@ -18,7 +18,7 @@ use crate::xmlutils;
 use crate::xmlutils::XMLNode;
 
 /// Struct that represent a navigation point in a table of content
-#[derive(Eq)]
+#[derive(Debug, Eq)]
 pub struct NavPoint {
     /// the title of this navpoint
     pub label: String,
@@ -62,16 +62,16 @@ pub struct MetadataNode {
 }
 
 impl MetadataNode {
-    pub fn from_content(content: String) -> MetadataNode {
+    pub fn from_content(content: impl Into<String>) -> MetadataNode {
         MetadataNode {
-            content,
+            content: content.into(),
             attr: Vec::new(),
         }
     }
 
-    pub fn from_attr(content: String, attr: &XMLNode) -> MetadataNode {
+    pub fn from_attr(content: impl Into<String>, attr: &XMLNode) -> MetadataNode {
         MetadataNode {
-            content,
+            content: content.into(),
             attr: attr.attrs.clone(),
         }
     }
