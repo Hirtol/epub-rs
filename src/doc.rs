@@ -678,7 +678,12 @@ impl<R: Read + Seek> EpubDoc<R> {
                 // Always assume it's a V3 epub
                 // Parse with the V2 parser, followed by the V3 parser
                 EpubV2Parser::parse(&mut self.context, &self.root_base, &root, &mut self.archive)?;
-                EpubV3Parser::parse(&mut self.context, &self.root_base, &root, &mut self.archive)?;
+                let _ = EpubV3Parser::parse(
+                    &mut self.context,
+                    &self.root_base,
+                    &root,
+                    &mut self.archive,
+                )?;
             }
         }
 

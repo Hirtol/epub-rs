@@ -201,6 +201,22 @@ impl XMLNode {
             error: String::from("tag not found"),
         })
     }
+
+    /// Finds all children of the current node with the given tag.
+    pub fn find_all_children(&self, tag: &str) -> Vec<ChildNodeRef> {
+        let mut result = Vec::new();
+
+        for c in self.childs.iter() {
+            if c.borrow().name.local_name == tag {
+                result.push(c.clone());
+            } else {
+                let mut others = c.borrow().find_all_children(tag);
+                result.append(&mut others);
+            }
+        }
+
+        result
+    }
 }
 
 impl fmt::Display for XMLNode {
