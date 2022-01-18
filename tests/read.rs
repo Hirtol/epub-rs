@@ -20,15 +20,6 @@ fn read_doc() {
             println!("{}: {}\n * {}\n", k, v.mime, v.path.display());
         }
     }
-
-    while let Ok(_) = doc.go_next() {
-        println!("ID: {}", doc.get_current_id().unwrap());
-        let current = doc.get_current_str();
-        match current {
-            Ok(v) => println!("Value {:?}\n", v),
-            Err(e) => println!("Text Err {:?}\n", e),
-        }
-    }
 }
 
 #[test]

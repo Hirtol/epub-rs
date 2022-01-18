@@ -96,17 +96,11 @@ pub struct EpubDoc<R: Read + Seek> {
     /// the zip archive
     archive: EpubArchive<R>,
 
-    /// The current chapter, is an spine index
-    current: usize,
-
     /// root file base path
     pub root_base: PathBuf,
 
     /// root file full path
     pub root_file: PathBuf,
-
-    /// Custom css list to inject in every xhtml file
-    pub extra_css: Vec<String>,
 
     pub context: EpubMetadata,
 }
@@ -177,8 +171,6 @@ impl<R: Read + Seek> EpubDoc<R> {
             archive,
             root_file: root_file.clone(),
             root_base: base_path.to_path_buf(),
-            current: 0,
-            extra_css: vec![],
             context: EpubMetadata {
                 spine,
                 resources,
@@ -392,26 +384,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         Err(anyhow!("path not found"))
     }
 
-    /// Returns the current chapter content
-    ///
-    /// The current follows the epub spine order. You can modify the current
-    /// calling to `go_next`, `go_prev` or `set_current` methods.
-    ///
-    /// # Errors
-    ///
-    /// This call shouldn't fail, but can return an error if the epub doc is
-    /// broken.
-    pub fn get_current(&mut self) -> Result<Vec<u8>, Error> {
-        let current_id = self.get_current_id()?;
-        self.get_resource(&current_id)
-    }
-
-    pub fn get_current_str(&mut self) -> Result<String, Error> {
-        let current_id = self.get_current_id()?;
-        self.get_resource_str(&current_id)
-    }
-
-    /// Returns the current chapter data, with resource uris renamed so they
+    /// Returns the chapter data at the provided spine id, with resource uris renamed so they
     /// have the epub:// prefix and all are relative to the root file
     ///
     /// This method is useful to render the content with a html engine, because inside the epub
@@ -424,150 +397,38 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// ```
     /// # use epub::doc::EpubDoc;
     /// # let mut doc = EpubDoc::new("test.epub").unwrap();
-    /// let current = doc.get_current_with_epub_uris().unwrap();
-    /// let text = String::from_utf8(current).unwrap();
-    /// assert!(text.contains("epub://OEBPS/Images/portada.png"));
-
-    /// doc.go_next();
-    /// let current = doc.get_current_with_epub_uris().unwrap();
+    /// let spine_id = doc.context.spine.get(1).unwrap().clone();
+    /// let current = doc.get_page_with_epub_uris(&spine_id).unwrap();
     /// let text = String::from_utf8(current).unwrap();
     /// assert!(text.contains("epub://OEBPS/Styles/stylesheet.css"));
     /// assert!(text.contains("http://creativecommons.org/licenses/by-sa/3.0/"));
     /// ```
-    ///
-    pub fn get_current_with_epub_uris(&mut self) -> Result<Vec<u8>, Error> {
-        let path = self.get_current_path()?;
-        let current = self.get_current()?;
+    pub fn get_page_with_epub_uris(&mut self, spine_id: &str) -> Result<Vec<u8>, Error> {
+        let path = {
+            let resource = self
+                .context
+                .resources
+                .get(spine_id)
+                .ok_or_else(|| anyhow!("Invalid spine id provided: `{spine_id}`"))?;
 
-        let resp = xmlutils::replace_attrs(
-            current.as_slice(),
-            |element, attr, value| match (element, attr) {
+            resource.path.clone()
+        };
+        let current = self.get_resource_by_path(&path)?;
+
+        let resp = xmlutils::replace_attrs(current.as_slice(), |element, attr, value| {
+            match (element, attr) {
                 ("link", "href") => build_epub_uri(&path, value),
                 ("img", "src") => build_epub_uri(&path, value),
                 ("image", "href") => build_epub_uri(&path, value),
                 ("a", "href") => build_epub_uri(&path, value),
                 _ => String::from(value),
-            },
-            &self.extra_css,
-        );
+            }
+        });
 
         match resp {
             Ok(a) => Ok(a),
             Err(error) => Err(anyhow!("{}", error.error)),
         }
-    }
-
-    /// Returns the current chapter mimetype
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let doc = doc.unwrap();
-    /// let m = doc.get_current_mime();
-    /// assert_eq!("application/xhtml+xml", m.unwrap());
-    /// ```
-    pub fn get_current_mime(&self) -> Result<String, Error> {
-        let current_id = self.get_current_id()?;
-        self.get_resource_mime(&current_id)
-    }
-
-    /// Returns the current chapter full path
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # use std::path::Path;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let doc = doc.unwrap();
-    /// let p = doc.get_current_path();
-    /// assert_eq!(Path::new("OEBPS/Text/titlepage.xhtml"), p.unwrap());
-    /// ```
-    pub fn get_current_path(&self) -> Result<PathBuf, Error> {
-        let current_id = self.get_current_id()?;
-
-        match self.context.resources.get(&current_id) {
-            Some(item) => Ok(item.path.clone()),
-            None => Err(anyhow!("Current not found")),
-        }
-    }
-
-    /// Returns the current chapter id
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let doc = doc.unwrap();
-    /// let id = doc.get_current_id();
-    /// assert_eq!("titlepage.xhtml", id.unwrap());
-    /// ```
-    pub fn get_current_id(&self) -> Result<String, Error> {
-        let current_id = self.context.spine.get(self.current);
-        match current_id {
-            Some(id) => Ok(id.to_string()),
-            None => Err(anyhow!("current is broken")),
-        }
-    }
-
-    /// Changes current to the next chapter
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let mut doc = doc.unwrap();
-    /// doc.go_next();
-    /// assert_eq!("000.xhtml", doc.get_current_id().unwrap());
-    ///
-    /// let len = doc.context.spine.len();
-    /// for i in 1..len {
-    ///     doc.go_next();
-    /// }
-    /// assert!(doc.go_next().is_err());
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// If the page is the last, will not change and an error will be returned
-    pub fn go_next(&mut self) -> Result<(), Error> {
-        if self.current + 1 >= self.context.spine.len() {
-            return Err(anyhow!("last page"));
-        }
-        self.current += 1;
-        Ok(())
-    }
-
-    /// Changes current to the prev chapter
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let mut doc = doc.unwrap();
-    /// assert!(doc.go_prev().is_err());
-    ///
-    /// doc.go_next(); // 000.xhtml
-    /// doc.go_next(); // 001.xhtml
-    /// doc.go_next(); // 002.xhtml
-    /// doc.go_prev(); // 001.xhtml
-    /// assert_eq!("001.xhtml", doc.get_current_id().unwrap());
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// If the page is the first, will not change and an error will be returned
-    pub fn go_prev(&mut self) -> Result<(), Error> {
-        if self.current < 1 {
-            return Err(anyhow!("first page"));
-        }
-        self.current -= 1;
-        Ok(())
     }
 
     /// Returns the number of chapters
@@ -582,57 +443,6 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// ```
     pub fn get_num_pages(&self) -> usize {
         self.context.spine.len()
-    }
-
-    /// Returns the current chapter number, starting from 0
-    pub fn get_current_page(&self) -> usize {
-        self.current
-    }
-
-    /// Changes the current page
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let mut doc = doc.unwrap();
-    /// assert_eq!(0, doc.get_current_page());
-    /// doc.set_current_page(2);
-    /// assert_eq!("001.xhtml", doc.get_current_id().unwrap());
-    /// assert_eq!(2, doc.get_current_page());
-    /// assert!(doc.set_current_page(50).is_err());
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// If the page isn't valid, will not change and an error will be returned
-    pub fn set_current_page(&mut self, n: usize) -> Result<(), Error> {
-        if n >= self.context.spine.len() {
-            return Err(anyhow!("page not valid"));
-        }
-        self.current = n;
-        Ok(())
-    }
-
-    /// This will inject this css in every html page getted with the
-    /// get_current_with_epub_uris call
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use epub::doc::EpubDoc;
-    /// # let doc = EpubDoc::new("test.epub");
-    /// # let mut doc = doc.unwrap();
-    /// # let _ = doc.set_current_page(2);
-    /// let extracss = "body { background-color: black; color: white }";
-    /// doc.add_extra_css(extracss);
-    /// let current = doc.get_current_with_epub_uris().unwrap();
-    /// let text = String::from_utf8(current).unwrap();
-    /// assert!(text.contains(extracss));
-    /// ```
-    pub fn add_extra_css(&mut self, css: &str) {
-        self.extra_css.push(String::from(css));
     }
 
     /// Function to convert a resource path to a chapter number in the spine

@@ -243,11 +243,7 @@ impl fmt::Display for XMLNode {
     }
 }
 
-pub fn replace_attrs<F>(
-    xmldoc: &[u8],
-    closure: F,
-    extra_css: &[String],
-) -> Result<Vec<u8>, XMLError>
+pub fn replace_attrs<F>(xmldoc: &[u8], closure: F) -> Result<Vec<u8>, XMLError>
 where
     F: Fn(&str, &str, &str) -> String,
 {
@@ -292,17 +288,6 @@ where
                     }
                 }
                 Ok(ReaderEvent::EndElement { name: n }) => {
-                    if n.local_name.to_lowercase() == "head" && !extra_css.is_empty() {
-                        // injecting here the extra css
-                        let mut allcss = extra_css.concat();
-                        allcss = String::from("*/") + &allcss + "/*";
-
-                        writer.write(WriterEvent::start_element("style"))?;
-                        writer.write("/*")?;
-                        writer.write(WriterEvent::cdata(&allcss))?;
-                        writer.write("*/")?;
-                        writer.write(WriterEvent::end_element())?;
-                    }
                     writer.write(WriterEvent::end_element())?;
                 }
                 ev @ Ok(_) => {

@@ -56,31 +56,6 @@
 //! assert_eq!("titlepage.xhtml", doc.context.spine[0]);
 //! ```
 //!
-//! ## Navigation using the doc internal state
-//!
-//! ```
-//! use epub::doc::EpubDoc;
-//! let doc = EpubDoc::new("test.epub");
-//! let mut doc = doc.unwrap();
-//! assert_eq!(0, doc.get_current_page());
-//! assert_eq!("application/xhtml+xml", doc.get_current_mime().unwrap());
-//!
-//! doc.go_next();
-//! assert_eq!("000.xhtml", doc.get_current_id().unwrap());
-//! doc.go_next();
-//! assert_eq!("001.xhtml", doc.get_current_id().unwrap());
-//! doc.go_prev();
-//! assert_eq!("000.xhtml", doc.get_current_id().unwrap());
-//!
-//! doc.set_current_page(2);
-//! assert_eq!("001.xhtml", doc.get_current_id().unwrap());
-//! assert_eq!(2, doc.get_current_page());
-//! assert!(doc.set_current_page(50).is_err());
-//!
-//! // doc.get_current() will return a Vec<u8> with the current page content
-//! // doc.get_current_str() will return a String with the current page content
-//! ```
-//!
 //! ## Getting the cover
 //!
 //! ```ignore
