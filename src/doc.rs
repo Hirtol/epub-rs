@@ -385,12 +385,12 @@ impl<R: Read + Seek> EpubDoc<R> {
     }
 
     /// Returns the chapter data at the provided spine id, with resource uris renamed so they
-    /// have the epub:// prefix and all are relative to the root file
+    /// have the `url_prepend` prefix and all are relative to the root file.
     ///
     /// This method is useful to render the content with a html engine, because inside the epub
     /// local paths are relatives, so you can provide that content, because the engine will look
     /// for the relative path in the filesystem and that file isn't there. You should provide files
-    /// with epub:// using the get_resource_by_path
+    /// with `url_prepend` using the get_resource_by_path
     ///
     /// # Examples
     ///
@@ -398,12 +398,16 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # use epub::doc::EpubDoc;
     /// # let mut doc = EpubDoc::new("test.epub").unwrap();
     /// let spine_id = doc.context.spine.get(1).unwrap().clone();
-    /// let current = doc.get_page_with_epub_uris(&spine_id).unwrap();
+    /// let current = doc.get_page_with_epub_uris(&spine_id, "epub://").unwrap();
     /// let text = String::from_utf8(current).unwrap();
     /// assert!(text.contains("epub://OEBPS/Styles/stylesheet.css"));
     /// assert!(text.contains("http://creativecommons.org/licenses/by-sa/3.0/"));
     /// ```
-    pub fn get_page_with_epub_uris(&mut self, spine_id: &str) -> Result<Vec<u8>, Error> {
+    pub fn get_page_with_epub_uris(
+        &mut self,
+        spine_id: &str,
+        url_prepend: &str,
+    ) -> Result<Vec<u8>, Error> {
         let path = {
             let resource = self
                 .context
@@ -417,10 +421,10 @@ impl<R: Read + Seek> EpubDoc<R> {
 
         let resp = xmlutils::replace_attrs(current.as_slice(), |element, attr, value| {
             match (element, attr) {
-                ("link", "href") => build_epub_uri(&path, value),
-                ("img", "src") => build_epub_uri(&path, value),
-                ("image", "href") => build_epub_uri(&path, value),
-                ("a", "href") => build_epub_uri(&path, value),
+                ("link", "href") => build_epub_uri(&path, url_prepend, value),
+                ("img", "src") => build_epub_uri(&path, url_prepend, value),
+                ("image", "href") => build_epub_uri(&path, url_prepend, value),
+                ("a", "href") => build_epub_uri(&path, url_prepend, value),
                 _ => String::from(value),
             }
         });
@@ -504,7 +508,7 @@ fn get_root_file(container: Vec<u8>) -> Result<PathBuf, Error> {
     Ok(PathBuf::from(attr))
 }
 
-fn build_epub_uri<P: AsRef<Path>>(path: P, append: &str) -> String {
+fn build_epub_uri<P: AsRef<Path>>(path: P, url_prepend: &str, append: &str) -> String {
     // allowing external links
     if append.starts_with("http") {
         return String::from(append);
@@ -534,5 +538,5 @@ fn build_epub_uri<P: AsRef<Path>>(path: P, append: &str) -> String {
         cpath.display().to_string()
     };
 
-    format!("epub://{}", path)
+    format!("{url_prepend}{path}")
 }
