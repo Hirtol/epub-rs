@@ -2,7 +2,7 @@ use epub::doc::EpubDoc;
 
 #[test]
 fn correct_table_of_contents() {
-    let input_file = "tests/docs/alices_adventures_v3.epub";
+    let input_file = "tests/docs/winnie_the_pooh.epub";
     let doc = EpubDoc::new(input_file).unwrap();
 
     assert!(
@@ -23,7 +23,7 @@ fn correct_table_of_contents() {
 
 #[test]
 fn correct_cover() {
-    let input_file = "tests/docs/alices_adventures_v3.epub";
+    let input_file = "tests/docs/winnie_the_pooh.epub";
     let mut doc = EpubDoc::new(input_file).unwrap();
 
     assert!(
