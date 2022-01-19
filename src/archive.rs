@@ -14,8 +14,6 @@ use std::io::{Read, Seek};
 /// files in the zip archive.
 pub struct EpubArchive<R: Read + Seek> {
     zip: zip::ZipArchive<R>,
-    pub path: PathBuf,
-    pub files: Vec<String>,
 }
 
 impl EpubArchive<BufReader<File>> {
@@ -28,8 +26,8 @@ impl EpubArchive<BufReader<File>> {
     pub fn new(path: impl Into<PathBuf>) -> Result<EpubArchive<BufReader<File>>, Error> {
         let path = path.into();
         let file = File::open(&path)?;
-        let mut archive = EpubArchive::from_reader(BufReader::new(file))?;
-        archive.path = path;
+        let archive = EpubArchive::from_reader(BufReader::new(file))?;
+
         Ok(archive)
     }
 }
@@ -43,13 +41,7 @@ impl<R: Read + Seek> EpubArchive<R> {
     pub fn from_reader(reader: R) -> Result<EpubArchive<R>, Error> {
         let zip = zip::ZipArchive::new(reader)?;
 
-        let files: Vec<String> = zip.file_names().map(|f| f.to_string()).collect();
-
-        Ok(EpubArchive {
-            zip,
-            path: PathBuf::new(),
-            files,
-        })
+        Ok(EpubArchive { zip })
     }
 
     /// Returns the content of the file by the `name` as `Vec<u8>`.

@@ -5,7 +5,7 @@ fn read_doc() {
     let input_file = "tests/docs/Metamorphosis-jackson.epub";
     let doc = EpubDoc::new(input_file);
     assert!(doc.is_ok());
-    let mut doc = doc.unwrap();
+    let doc = doc.unwrap();
 
     if let Some(title) = doc.mdata("title") {
         println!("Book title: {}", title);

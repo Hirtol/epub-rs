@@ -287,7 +287,7 @@ where
                         writer.write(w)?;
                     }
                 }
-                Ok(ReaderEvent::EndElement { name: n }) => {
+                Ok(ReaderEvent::EndElement { .. }) => {
                     writer.write(WriterEvent::end_element())?;
                 }
                 ev @ Ok(_) => {

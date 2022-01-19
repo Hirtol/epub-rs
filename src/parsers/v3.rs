@@ -14,7 +14,7 @@ impl EpubParser for EpubV3Parser {
     fn parse<R: Read + Seek, PATH: AsRef<Path>>(
         epub: &mut EpubMetadata,
         root_base: PATH,
-        xml: &RootXml,
+        _xml: &RootXml,
         archive: &mut EpubArchive<R>,
     ) -> anyhow::Result<()> {
         // Cover

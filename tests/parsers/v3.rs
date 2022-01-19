@@ -24,7 +24,7 @@ fn correct_table_of_contents() {
 #[test]
 fn correct_cover() {
     let input_file = "tests/docs/winnie_the_pooh.epub";
-    let mut doc = EpubDoc::new(input_file).unwrap();
+    let doc = EpubDoc::new(input_file).unwrap();
 
     assert!(
         doc.get_cover_id().is_ok(),
