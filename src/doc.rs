@@ -51,6 +51,12 @@ impl PartialEq for NavPoint {
     }
 }
 
+/// A resource item is any item that was listed in the `content.opf` as part of the manifest.
+/// It is guaranteed to have a path within the Epub, and a mime type.
+///
+/// Optionally it can contain a property attribute, [see here](https://www.w3.org/publishing/epub3/epub-packages.html#sec-item-property-values).
+/// Note that `cover-image` and `nav` properties are handled already in the Epub V3 parsing.
+/// See [EpubDoc::get_cover] and [EpubDoc::get_toc] for more information.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceItem {
     pub path: PathBuf,
@@ -58,9 +64,13 @@ pub struct ResourceItem {
     pub property: Option<String>,
 }
 
+/// A Metadata Node represents a piece of metadata that is in the `content.opf` file of the Epub.
+/// It contains its textual content, as well as any attributes that was on the XML node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MetadataNode {
+    /// The textual content that was within the XML open and close tags
     pub content: String,
+    /// The attributes of the XML node
     pub attr: Vec<xml::attribute::OwnedAttribute>,
 }
 
@@ -276,6 +286,13 @@ impl<R: Read + Seek> EpubDoc<R> {
 
         let cover_data = self.get_resource(&cover_id)?;
         Ok(cover_data)
+    }
+
+    /// Returns the ToC as found in the Epub.
+    ///
+    /// Note that if no ToC was found this [Vec] will be empty
+    pub fn get_toc(&self) -> &Vec<NavPoint> {
+        &self.context.toc
     }
 
     /// Returns Release Identifier defined at
