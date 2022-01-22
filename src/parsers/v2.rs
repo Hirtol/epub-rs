@@ -1,11 +1,11 @@
 use crate::archive::EpubArchive;
 use crate::doc::{MetadataNode, NavPoint};
 use crate::parsers::{EpubMetadata, EpubParser, RootXml};
-use crate::xmlutils;
 use crate::xmlutils::XMLError;
+use crate::{utils, xmlutils};
 use anyhow::anyhow;
 use std::io::{Read, Seek};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct EpubV2Parser;
 
@@ -162,13 +162,18 @@ impl EpubV2Parser {
             };
 
             if let (Some(o), Some(c), Some(l)) = (play_order, content, label) {
-                let navpoint = NavPoint {
-                    label: l.clone(),
-                    content: c.clone(),
-                    children: Self::get_navpoints(root_base, &item),
-                    play_order: o,
-                };
-                navpoints.push(navpoint);
+                if let Some(href) = utils::percent_decode(&c.to_string_lossy()) {
+                    let navpoint = NavPoint {
+                        label: l.clone(),
+                        content: PathBuf::from(href.as_ref()),
+                        children: Self::get_navpoints(root_base, &item),
+                        play_order: o,
+                    };
+
+                    navpoints.push(navpoint);
+                } else {
+                    println!("Failure in v2 parser, invalid ToC href entry: {:?}", c);
+                }
             }
         }
 

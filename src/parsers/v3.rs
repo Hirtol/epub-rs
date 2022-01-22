@@ -3,10 +3,10 @@
 use crate::archive::EpubArchive;
 use crate::doc::NavPoint;
 use crate::parsers::{EpubMetadata, EpubParser, RootXml};
-use crate::xmlutils;
+use crate::{utils, xmlutils};
 use anyhow::anyhow;
 use std::io::{Read, Seek};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct EpubV3Parser;
 
@@ -100,14 +100,21 @@ fn get_navpoints(root_base: impl AsRef<Path>, parent: &xmlutils::XMLNode) -> Vec
         let content = item.get_attr("href").ok().map(|i| root_base.join(i));
 
         if let (Some(label), Some(content)) = (label, content) {
-            let navpoint = NavPoint {
-                label,
-                content,
-                children: get_navpoints(root_base, &item),
-                play_order: i,
-            };
+            if let Some(href) = utils::percent_decode(&content.to_string_lossy()) {
+                let navpoint = NavPoint {
+                    label,
+                    content: PathBuf::from(href.as_ref()),
+                    children: get_navpoints(root_base, &item),
+                    play_order: i,
+                };
 
-            navpoints.push(navpoint);
+                navpoints.push(navpoint);
+            } else {
+                println!(
+                    "Failure in v3 parser, invalid ToC href entry: {:?}",
+                    content
+                );
+            }
         }
     }
 

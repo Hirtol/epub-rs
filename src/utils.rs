@@ -1,3 +1,4 @@
+use std::borrow::{Borrow, Cow};
 use std::path::{Path, PathBuf};
 
 // Forcibly converts separators in a filepath to unix separators to
@@ -15,4 +16,11 @@ pub fn convert_path_separators(root_base: impl AsRef<Path>, href: &str) -> PathB
     } else {
         path
     }
+}
+
+/// Decode the provided input if it contains percent encoded values (e.g, URLs).
+pub fn percent_decode(input: &str) -> Option<Cow<str>> {
+    percent_encoding::percent_decode(input.as_bytes())
+        .decode_utf8()
+        .ok()
 }
