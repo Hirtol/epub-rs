@@ -171,8 +171,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     ///
     /// Returns an error if the epub is broken.
     pub fn from_reader(reader: R) -> Result<EpubDoc<R>, Error> {
-        let mut archive = EpubArchive::<R>::from_reader(reader)?;
-        let spine: Vec<String> = vec![];
+        let mut archive = EpubArchive::from_reader(reader)?;
         let resources = HashMap::new();
 
         let container = archive.get_container_file()?;
@@ -184,7 +183,7 @@ impl<R: Read + Seek> EpubDoc<R> {
             root_base: base_path.to_path_buf(),
             root_file,
             context: EpubMetadata {
-                spine,
+                spine: vec![],
                 resources,
                 toc: vec![],
                 metadata: Default::default(),
@@ -194,6 +193,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         };
 
         doc.fill_resources()?;
+
         Ok(doc)
     }
 
