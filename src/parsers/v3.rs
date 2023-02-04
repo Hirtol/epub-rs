@@ -58,8 +58,8 @@ fn fill_toc<R: Read + Seek, PATH: AsRef<Path>>(
 ) -> Option<()> {
     let toc_res = epub.resources.get(id)?;
 
-    let container = archive.get_entry(&toc_res.path).ok()?;
-    let root = xmlutils::XMLReader::parse(container.as_slice()).ok()?;
+    let toc_xml = archive.get_entry(&toc_res.path).ok()?;
+    let root = xmlutils::XMLReader::parse(toc_xml.as_slice()).ok()?;
 
     let navs = root.borrow().find_all_children("nav");
 

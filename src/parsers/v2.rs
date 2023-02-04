@@ -2,6 +2,7 @@ use crate::archive::EpubArchive;
 use crate::doc::{MetadataNode, NavPoint};
 use crate::error::{ArchiveError, Result};
 use crate::parsers::{EpubMetadata, EpubParser, RootXml};
+use crate::xmlutils::XMLNode;
 use crate::{utils, xmlutils};
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
@@ -117,61 +118,65 @@ impl EpubV2Parser {
     ) -> Option<()> {
         let toc_res = epub.resources.get(id)?;
 
-        let container = archive.get_entry(&toc_res.path).ok()?;
-        let root = xmlutils::XMLReader::parse(container.as_slice()).ok()?;
+        let toc_xml = archive.get_entry(&toc_res.path).ok()?;
+        let root = xmlutils::XMLReader::parse(toc_xml.as_slice()).ok()?;
 
-        let mapnode = root.borrow().find("navMap")?;
+        let map_node = root.borrow().find("navMap")?;
 
         epub.toc
-            .append(&mut Self::get_navpoints(root_base, &mapnode.borrow()));
+            .append(&mut Self::get_navpoints(root_base, &map_node.borrow()));
         epub.toc.sort();
 
         Some(())
     }
 
-    /// Recursively extract all navpoints from a node.
+    /// Recursively extract all nav-points from a node.
     fn get_navpoints(root_base: impl AsRef<Path>, parent: &xmlutils::XMLNode) -> Vec<NavPoint> {
-        let mut navpoints = Vec::new();
         let root_base = root_base.as_ref();
 
         // TODO: get docTitle
         // TODO: parse metadata (dtb:totalPageCount, dtb:depth, dtb:maxPageNumber)
 
-        for nav in parent.children.iter() {
-            let item = nav.borrow();
-            if item.name.local_name != "navPoint" {
-                continue;
-            }
-            let play_order = item
-                .get_attr("playOrder")
-                .and_then(|n| n.parse::<usize>().ok());
-            let content = item
-                .find("content")
-                .and_then(|c| c.borrow().get_attr("src").map(|p| root_base.join(p)));
-            let label = item.find("navLabel").and_then(|l| {
-                l.borrow()
-                    .children
-                    .get(0)
-                    .and_then(|t| t.borrow().text.clone())
-            });
+        let mut output: Vec<_> = parent
+            .children
+            .iter()
+            .flat_map(|item| Self::parse_nav_point(&item.borrow(), root_base))
+            .collect();
 
-            if let (Some(o), Some(c), Some(l)) = (play_order, content, label) {
-                if let Some(href) = utils::percent_decode(&c.to_string_lossy()) {
-                    let navpoint = NavPoint {
-                        label: l.clone(),
-                        content: PathBuf::from(href.as_ref()),
-                        children: Self::get_navpoints(root_base, &item),
-                        play_order: o,
-                    };
+        output.sort();
+        output
+    }
 
-                    navpoints.push(navpoint);
-                } else {
-                    println!("Failure in v2 parser, invalid ToC href entry: {:?}", c);
-                }
-            }
+    fn parse_nav_point(item: &XMLNode, root_base: &Path) -> Option<NavPoint> {
+        if item.name.local_name != "navPoint" {
+            return None;
         }
 
-        navpoints.sort();
-        navpoints
+        let play_order = item
+            .get_attr("playOrder")
+            .and_then(|n| n.parse::<usize>().ok())?;
+        let content = item
+            .find("content")
+            .and_then(|c| c.borrow().get_attr("src").map(|p| root_base.join(p)))?;
+        let label = item.find("navLabel").and_then(|l| {
+            l.borrow()
+                .children
+                .get(0)
+                .and_then(|t| t.borrow().text.clone())
+        })?;
+
+        if let Some(href) = utils::percent_decode(&content.to_string_lossy()) {
+            let navpoint = NavPoint {
+                label,
+                content: PathBuf::from(href.as_ref()),
+                children: Self::get_navpoints(root_base, &item),
+                play_order,
+            };
+
+            Some(navpoint)
+        } else {
+            // println!("Failure in v2 parser, invalid ToC href entry: {:?}", c);
+            None
+        }
     }
 }

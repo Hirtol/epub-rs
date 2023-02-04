@@ -475,8 +475,8 @@ impl<R: Read + Seek> EpubDoc<R> {
 
     fn fill_resources(&mut self) -> Result<()> {
         let mut archive = self.archive.borrow_mut();
-        let container = archive.get_entry(&self.root_file)?;
-        let root = xmlutils::XMLReader::parse(container.as_slice())?;
+        let root_container = archive.get_entry(&self.root_file)?;
+        let root = xmlutils::XMLReader::parse(root_container.as_slice())?;
         let root_borrow = root.borrow();
         let epub_version = root_borrow
             .get_attr("version")

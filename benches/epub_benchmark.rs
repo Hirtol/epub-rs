@@ -19,8 +19,7 @@ fn epub_grab_resource_benchmark(c: &mut Criterion) {
 
     group.bench_function("Read Charles Dickens", |bencher| {
         bencher.iter_with_large_drop(|| {
-            let mut doc =
-                EpubDoc::new("tests/docs/charles-dickens_a-christmas-carol.epub").unwrap();
+            let doc = EpubDoc::new("tests/docs/charles-dickens_a-christmas-carol.epub").unwrap();
             let _ = doc.get_resource("chapter-1.xhtml").unwrap();
         })
     });
