@@ -2,9 +2,9 @@
 
 use crate::archive::EpubArchive;
 use crate::doc::NavPoint;
+use crate::error::Result;
 use crate::parsers::{EpubMetadata, EpubParser, RootXml};
 use crate::{utils, xmlutils};
-use anyhow::anyhow;
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ impl EpubParser for EpubV3Parser {
         root_base: PATH,
         _xml: &RootXml,
         archive: &mut EpubArchive<R>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         // Cover
         if epub.cover_id.is_none() {
             // In the Epub 3.2 specification an `item` element in the `manifest` can have the `cover-image` property.
@@ -55,36 +55,32 @@ fn fill_toc<R: Read + Seek, PATH: AsRef<Path>>(
     root_base: PATH,
     archive: &mut EpubArchive<R>,
     id: &str,
-) -> anyhow::Result<()> {
-    let toc_res = epub
-        .resources
-        .get(id)
-        .ok_or_else(|| anyhow!("No toc found"))?;
+) -> Option<()> {
+    let toc_res = epub.resources.get(id)?;
 
-    let container = archive.get_entry(&toc_res.path)?;
-    let root = xmlutils::XMLReader::parse(container.as_slice())?;
+    let container = archive.get_entry(&toc_res.path).ok()?;
+    let root = xmlutils::XMLReader::parse(container.as_slice()).ok()?;
 
     let navs = root.borrow().find_all_children("nav");
 
-    let toc = navs
-        .into_iter()
-        .find_map(|nav| {
-            //TODO: The Attribute is epub:type, but we only search for local name at the moment
-            let name = nav.borrow().get_attr("type").ok()?.to_string();
+    let toc = navs.into_iter().find_map(|nav| {
+        //TODO: The Attribute is epub:type, but we only search for local name at the moment
+        let borrow = nav.borrow();
+        let name = borrow.get_attr("type")?;
 
-            if name == "toc" {
-                Some(nav)
-            } else {
-                None
-            }
-        })
-        .ok_or(anyhow!("No toc found"))?;
+        if name == "toc" {
+            drop(borrow);
+            Some(nav)
+        } else {
+            None
+        }
+    })?;
 
     epub.toc
         .append(&mut get_navpoints(root_base, &toc.borrow()));
     epub.toc.sort();
 
-    Ok(())
+    Some(())
 }
 
 /// Recursively extract all navpoints from a node.
@@ -97,7 +93,7 @@ fn get_navpoints(root_base: impl AsRef<Path>, parent: &xmlutils::XMLNode) -> Vec
         let item = link.borrow();
 
         let label = item.text.clone();
-        let content = item.get_attr("href").ok().map(|i| root_base.join(i));
+        let content = item.get_attr("href").map(|i| root_base.join(i));
 
         if let (Some(label), Some(content)) = (label, content) {
             if let Some(href) = utils::percent_decode(&content.to_string_lossy()) {

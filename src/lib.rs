@@ -79,5 +79,6 @@ mod xmlutils;
 
 pub mod archive;
 pub mod doc;
+pub mod error;
 pub(crate) mod parsers;
 mod utils;

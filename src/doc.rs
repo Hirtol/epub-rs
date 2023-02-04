@@ -3,7 +3,6 @@
 //! Provides easy methods to navigate through the epub content, cover,
 //! chapters, etc.
 
-use anyhow::{anyhow, Error};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -13,6 +12,7 @@ use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
 
 use crate::archive::EpubArchive;
+use crate::error::{ArchiveError, Result};
 use crate::parsers::{EpubMetadata, EpubParser};
 
 use crate::parsers::v2::EpubV2Parser;
@@ -135,7 +135,7 @@ impl EpubDoc<BufReader<File>> {
     ///
     /// Returns an error if the epub is broken or if the file doesn't
     /// exists.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<EpubDoc<BufReader<File>>, Error> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ArchiveError> {
         let path = path.as_ref();
         let file = File::open(path)?;
         let doc = EpubDoc::from_reader(BufReader::new(file))?;
@@ -170,7 +170,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Returns an error if the epub is broken.
-    pub fn from_reader(reader: R) -> Result<EpubDoc<R>, Error> {
+    pub fn from_reader(reader: R) -> Result<Self> {
         let mut archive = EpubArchive::from_reader(reader)?;
         let resources = HashMap::new();
 
@@ -247,14 +247,11 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// let cover_id = doc.get_cover_id().unwrap();
     /// ```
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns an error if the cover path can't be found.
-    pub fn get_cover_id(&self) -> anyhow::Result<&str> {
-        self.context
-            .cover_id
-            .as_deref()
-            .ok_or_else(|| anyhow!("Cover not found"))
+    /// Returns `None` if the cover path can't be found.
+    pub fn get_cover_id(&self) -> Option<&str> {
+        self.context.cover_id.as_deref()
     }
 
     /// Returns the cover as Vec<u8>
@@ -281,11 +278,11 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Returns an error if the cover can't be found.
-    pub fn get_cover(&self) -> Result<Vec<u8>, Error> {
-        let cover_id = self.get_cover_id()?.to_string();
+    pub fn get_cover(&self) -> Option<Vec<u8>> {
+        let cover_id = self.get_cover_id()?;
 
         let cover_data = self.get_resource(&cover_id)?;
-        Ok(cover_data)
+        Some(cover_data)
     }
 
     /// Returns the ToC as found in the Epub.
@@ -314,47 +311,42 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Returns an error if the path doesn't exists in the epub
-    pub fn get_resource_by_path<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>, Error> {
+    pub fn get_resource_by_path<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
         let content = self.archive.borrow_mut().get_entry(path)?;
         Ok(content)
     }
 
     /// Returns the resource content by the id defined in the spine
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns an error if the id doesn't exists in the epub
-    pub fn get_resource(&self, id: &str) -> Result<Vec<u8>, Error> {
-        let path = match self.context.resources.get(id) {
-            Some(s) => &s.path,
-            None => return Err(anyhow!("id not found")),
-        };
-        let content = self.get_resource_by_path(path)?;
-        Ok(content)
+    /// Returns `None` if the `id` doesn't exists in the epub
+    pub fn get_resource(&self, id: &str) -> Option<Vec<u8>> {
+        let res_item = self.context.resources.get(id)?;
+
+        self.get_resource_by_path(&res_item.path).ok()
     }
 
     /// Returns the resource content by full path in the epub archive, as String
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns an error if the path doesn't exists in the epub
-    pub fn get_resource_str_by_path<P: AsRef<Path>>(&self, path: P) -> Result<String, Error> {
+    /// Returns `None` if the path doesn't exists in the epub
+    pub fn get_resource_str_by_path(&self, path: impl AsRef<Path>) -> Result<String, ArchiveError> {
         let content = self.archive.borrow_mut().get_entry_as_str(path)?;
+
         Ok(content)
     }
 
     /// Returns the resource content by the id defined in the spine, as String
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns an error if the id doesn't exists in the epub
-    pub fn get_resource_str(&self, id: &str) -> Result<String, Error> {
-        let path = match self.context.resources.get(id) {
-            Some(s) => &s.path,
-            None => return Err(anyhow!("id not found")),
-        };
-        let content = self.get_resource_str_by_path(path)?;
-        Ok(content)
+    /// Returns `None` if the id doesn't exists in the epub
+    pub fn get_resource_str(&self, id: &str) -> Option<String> {
+        let res_item = self.context.resources.get(id)?;
+
+        self.get_resource_str_by_path(&res_item.path).ok()
     }
 
     /// Returns the resource mime-type
@@ -368,14 +360,14 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// let mime = doc.get_resource_mime("portada.png");
     /// assert_eq!("image/png", mime.unwrap());
     /// ```
-    /// # Errors
+    /// # Returns
     ///
     /// Fails if the resource can't be found.
-    pub fn get_resource_mime(&self, id: &str) -> Result<&str, Error> {
-        if let Some(item) = self.context.resources.get(id) {
-            return Ok(item.mime.as_str());
-        }
-        Err(anyhow!("id not found"))
+    pub fn get_resource_mime(&self, id: &str) -> Option<&str> {
+        self.context
+            .resources
+            .get(id)
+            .map(|item| item.mime.as_str())
     }
 
     /// Returns the resource mime searching by source full path
@@ -393,15 +385,16 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// # Errors
     ///
     /// Fails if the resource can't be found.
-    pub fn get_resource_mime_by_path<P: AsRef<Path>>(&self, path: P) -> Result<&str, Error> {
+    pub fn get_resource_mime_by_path(&self, path: impl AsRef<Path>) -> Option<&str> {
         let path = path.as_ref();
 
-        for (_, v) in self.context.resources.iter() {
-            if v.path == path {
-                return Ok(&v.mime);
-            }
-        }
-        Err(anyhow!("path not found"))
+        self.context
+            .resources
+            .iter()
+            .map(|(_, data)| data)
+            .filter(|data| data.path == path)
+            .map(|data| data.mime.as_str())
+            .next()
     }
 
     /// Returns the chapter data at the provided spine id, with resource uris renamed so they
@@ -423,16 +416,12 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// assert!(text.contains("epub://OEBPS/Styles/stylesheet.css"));
     /// assert!(text.contains("http://creativecommons.org/licenses/by-sa/3.0/"));
     /// ```
-    pub fn get_page_with_epub_uris(
-        &self,
-        spine_id: &str,
-        url_prepend: &str,
-    ) -> Result<Vec<u8>, Error> {
+    pub fn get_page_with_epub_uris(&self, spine_id: &str, url_prepend: &str) -> Result<Vec<u8>> {
         let path = &self
             .context
             .resources
             .get(spine_id)
-            .ok_or_else(|| anyhow!("Invalid spine id provided: `{spine_id}`"))?
+            .ok_or(ArchiveError::InvalidId)?
             .path;
         let current = self.get_resource_by_path(path)?;
 
@@ -444,12 +433,9 @@ impl<R: Read + Seek> EpubDoc<R> {
                 ("a", "href") => build_epub_uri(path, url_prepend, value),
                 _ => String::from(value),
             }
-        });
+        })?;
 
-        match resp {
-            Ok(a) => Ok(a),
-            Err(error) => Err(anyhow!("{}", error.error)),
-        }
+        Ok(resp)
     }
 
     /// Returns the number of chapters
@@ -487,13 +473,16 @@ impl<R: Read + Seek> EpubDoc<R> {
         self.context.spine.iter().position(|item| item == uri)
     }
 
-    fn fill_resources(&mut self) -> Result<(), Error> {
+    fn fill_resources(&mut self) -> Result<()> {
         let mut archive = self.archive.borrow_mut();
         let container = archive.get_entry(&self.root_file)?;
         let root = xmlutils::XMLReader::parse(container.as_slice())?;
-        let epub_version = root.borrow().get_attr("version")?.to_string();
+        let root_borrow = root.borrow();
+        let epub_version = root_borrow
+            .get_attr("version")
+            .ok_or(ArchiveError::ParsingFailure)?;
 
-        match epub_version.as_str() {
+        match epub_version {
             "2.0" => {
                 // Parse with only the V2 parser
                 EpubV2Parser::parse(&mut self.context, &self.root_base, &root, &mut archive)?;
@@ -511,13 +500,15 @@ impl<R: Read + Seek> EpubDoc<R> {
     }
 }
 
-fn get_root_file(container: Vec<u8>) -> Result<PathBuf, Error> {
+fn get_root_file(container: Vec<u8>) -> Result<PathBuf, ArchiveError> {
     let root = xmlutils::XMLReader::parse(container.as_slice())?;
     let el = root.borrow();
-    let element = el.find("rootfile")?;
+    let element = el.find("rootfile").ok_or(ArchiveError::ParsingFailure)?;
     let el2 = element.borrow();
 
-    let attr = el2.get_attr("full-path")?;
+    let attr = el2
+        .get_attr("full-path")
+        .ok_or(ArchiveError::ParsingFailure)?;
 
     Ok(PathBuf::from(attr))
 }

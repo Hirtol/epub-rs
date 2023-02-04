@@ -1,9 +1,8 @@
 use crate::archive::EpubArchive;
 use crate::doc::{MetadataNode, NavPoint};
+use crate::error::{ArchiveError, Result};
 use crate::parsers::{EpubMetadata, EpubParser, RootXml};
-use crate::xmlutils::XMLError;
 use crate::{utils, xmlutils};
-use anyhow::anyhow;
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
@@ -15,41 +14,41 @@ impl EpubParser for EpubV2Parser {
         root_base: PATH,
         xml: &RootXml,
         archive: &mut EpubArchive<R>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let root = xml.borrow();
         let root_base = root_base.as_ref();
-        let unique_identifier_id = &root.get_attr("unique-identifier").ok();
+        let unique_identifier_id = root.get_attr("unique-identifier");
 
         // resources from manifest
-        let manifest = root.find("manifest")?;
-        for r in manifest.borrow().childs.iter() {
+        let manifest = root.find("manifest").ok_or(ArchiveError::ParsingFailure)?;
+        for r in manifest.borrow().children.iter() {
             let item = r.borrow();
             let _ = epub.insert_resource(root_base, &item);
         }
 
         // items from spine
-        let spine = root.find("spine")?;
-        for r in spine.borrow().childs.iter() {
+        let spine = root.find("spine").ok_or(ArchiveError::ParsingFailure)?;
+        for r in spine.borrow().children.iter() {
             let item = r.borrow();
             let _ = Self::insert_spine(epub, &item);
         }
 
         // toc.ncx
-        if let Ok(toc) = spine.borrow().get_attr("toc") {
+        if let Some(toc) = spine.borrow().get_attr("toc") {
             let _ = Self::fill_toc(epub, root_base, archive, toc);
         }
 
         // metadata
-        let metadata = root.find("metadata")?;
-        for r in metadata.borrow().childs.iter() {
+        let metadata = root.find("metadata").ok_or(ArchiveError::ParsingFailure)?;
+        for r in metadata.borrow().children.iter() {
             let item = r.borrow();
             if item.name.local_name == "meta" {
-                if let (Ok(k), Ok(v)) = (item.get_attr("name"), item.get_attr("content")) {
+                if let (Some(k), Some(v)) = (item.get_attr("name"), item.get_attr("content")) {
                     epub.metadata
                         .entry(k.to_string())
                         .or_insert(vec![])
                         .push(MetadataNode::from_attr(v, &item));
-                } else if let Ok(k) = item.get_attr("property") {
+                } else if let Some(k) = item.get_attr("property") {
                     let v = match item.text {
                         Some(ref x) => x.to_string(),
                         None => String::from(""),
@@ -72,7 +71,7 @@ impl EpubParser for EpubV2Parser {
                     && epub.unique_identifier.is_none()
                     && unique_identifier_id.is_some()
                 {
-                    if let Ok(id) = item.get_attr("id") {
+                    if let Some(id) = item.get_attr("id") {
                         if &id == unique_identifier_id.as_ref().unwrap() {
                             epub.unique_identifier = Some(v.to_string());
                         }
@@ -102,10 +101,12 @@ impl EpubParser for EpubV2Parser {
 }
 
 impl EpubV2Parser {
-    fn insert_spine(epub: &mut EpubMetadata, item: &xmlutils::XMLNode) -> Result<(), XMLError> {
+    fn insert_spine(epub: &mut EpubMetadata, item: &xmlutils::XMLNode) -> Option<()> {
         let id = item.get_attr("idref")?;
+
         epub.spine.push(id.to_string());
-        Ok(())
+
+        Some(())
     }
 
     fn fill_toc<R: Read + Seek, PATH: AsRef<Path>>(
@@ -113,14 +114,11 @@ impl EpubV2Parser {
         root_base: PATH,
         archive: &mut EpubArchive<R>,
         id: &str,
-    ) -> anyhow::Result<()> {
-        let toc_res = epub
-            .resources
-            .get(id)
-            .ok_or_else(|| anyhow!("No toc found"))?;
+    ) -> Option<()> {
+        let toc_res = epub.resources.get(id)?;
 
-        let container = archive.get_entry(&toc_res.path)?;
-        let root = xmlutils::XMLReader::parse(container.as_slice())?;
+        let container = archive.get_entry(&toc_res.path).ok()?;
+        let root = xmlutils::XMLReader::parse(container.as_slice()).ok()?;
 
         let mapnode = root.borrow().find("navMap")?;
 
@@ -128,7 +126,7 @@ impl EpubV2Parser {
             .append(&mut Self::get_navpoints(root_base, &mapnode.borrow()));
         epub.toc.sort();
 
-        Ok(())
+        Some(())
     }
 
     /// Recursively extract all navpoints from a node.
@@ -139,27 +137,23 @@ impl EpubV2Parser {
         // TODO: get docTitle
         // TODO: parse metadata (dtb:totalPageCount, dtb:depth, dtb:maxPageNumber)
 
-        for nav in parent.childs.iter() {
+        for nav in parent.children.iter() {
             let item = nav.borrow();
             if item.name.local_name != "navPoint" {
                 continue;
             }
             let play_order = item
                 .get_attr("playOrder")
-                .ok()
                 .and_then(|n| n.parse::<usize>().ok());
-            let content = match item.find("content") {
-                Ok(c) => c.borrow().get_attr("src").ok().map(|p| root_base.join(p)),
-                _ => None,
-            };
-            let label = match item.find("navLabel") {
-                Ok(l) => l
-                    .borrow()
-                    .childs
+            let content = item
+                .find("content")
+                .and_then(|c| c.borrow().get_attr("src").map(|p| root_base.join(p)));
+            let label = item.find("navLabel").and_then(|l| {
+                l.borrow()
+                    .children
                     .get(0)
-                    .and_then(|t| t.borrow().text.clone()),
-                _ => None,
-            };
+                    .and_then(|t| t.borrow().text.clone())
+            });
 
             if let (Some(o), Some(c), Some(l)) = (play_order, content, label) {
                 if let Some(href) = utils::percent_decode(&c.to_string_lossy()) {

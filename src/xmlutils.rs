@@ -8,7 +8,6 @@ use xml::reader::ParserConfig;
 use xml::reader::XmlEvent as ReaderEvent;
 use xml::writer::XmlEvent as WriterEvent;
 
-use std::error::Error;
 use std::fmt;
 use xml::writer::EmitterConfig;
 use xml::writer::Error as EmitterError;
@@ -39,7 +38,6 @@ impl<'a> XMLReader<'a> {
             };
             let content_u16: Vec<u16> = content[2..]
                 .chunks_exact(2)
-                .into_iter()
                 .map(|a| u16::from_ne_bytes([a[big_byte], a[small_byte]]))
                 .collect();
             content_str = String::from_utf16_lossy(content_u16.as_slice());
@@ -77,14 +75,14 @@ impl<'a> XMLReader<'a> {
                         parent: None,
                         text: None,
                         cdata: None,
-                        childs: vec![],
+                        children: vec![],
                     };
                     let arnode = Rc::new(RefCell::new(node));
 
                     {
                         let current = parents.last();
                         if let Some(c) = current {
-                            c.borrow_mut().childs.push(arnode.clone());
+                            c.borrow_mut().children.push(arnode.clone());
                             arnode.borrow_mut().parent = Some(Rc::downgrade(c));
                         }
                     }
@@ -116,53 +114,25 @@ impl<'a> XMLReader<'a> {
         }
 
         if let Some(r) = root {
-            let a = Rc::try_unwrap(r);
-            match a {
-                Ok(n) => return Ok(n),
-                Err(_) => {
-                    return Err(XMLError {
-                        error: String::from("Unknown error"),
-                    })
-                }
-            }
-        }
-        Err(XMLError {
-            error: String::from("Not xml elements"),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct XMLError {
-    pub error: String,
-}
-
-impl Error for XMLError {
-    fn description(&self) -> &str {
-        &self.error
-    }
-}
-
-impl fmt::Display for XMLError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "XMLError: {}", self.error)
-    }
-}
-
-impl From<EmitterError> for XMLError {
-    fn from(_: EmitterError) -> XMLError {
-        XMLError {
-            error: String::from("Problem writting"),
+            Rc::try_unwrap(r).map_err(|_| XMLError::InvalidState)
+        } else {
+            Err(XMLError::NoElements)
         }
     }
 }
 
-impl From<ReaderError> for XMLError {
-    fn from(_: ReaderError) -> XMLError {
-        XMLError {
-            error: String::from("Problem reading"),
-        }
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum XMLError {
+    #[error("XML Reader Error: {0}")]
+    Reader(#[from] ReaderError),
+    #[error("XML Writer Error: {0}")]
+    Emitter(#[from] EmitterError),
+    #[error("Attribute Not Found: {0}")]
+    AttrNotFound(String),
+    #[error("Invalid State; this is a bug")]
+    InvalidState,
+    #[error("No XML Elements Found")]
+    NoElements,
 }
 
 #[derive(Debug)]
@@ -173,40 +143,36 @@ pub struct XMLNode {
     pub text: Option<String>,
     pub cdata: Option<String>,
     pub parent: Option<ParentNodeRef>,
-    pub childs: Vec<ChildNodeRef>,
+    pub children: Vec<ChildNodeRef>,
 }
 
 impl XMLNode {
-    pub fn get_attr(&self, name: &str) -> Result<&str, XMLError> {
-        for attr in self.attrs.iter() {
-            if attr.name.local_name == name {
-                return Ok(attr.value.as_str());
-            }
-        }
-
-        Err(XMLError {
-            error: String::from("attr not found"),
-        })
+    pub fn get_attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|a| a.name.local_name == name)
+            .map(|a| a.value.as_str())
     }
 
-    pub fn find(&self, tag: &str) -> Result<ChildNodeRef, XMLError> {
-        for c in self.childs.iter() {
-            if c.borrow().name.local_name == tag {
-                return Ok(c.clone());
-            } else if let Ok(n) = c.borrow().find(tag) {
-                return Ok(n);
-            }
-        }
-        Err(XMLError {
-            error: String::from("tag not found"),
-        })
+    pub fn find(&self, tag: &str) -> Option<ChildNodeRef> {
+        self.children
+            .iter()
+            .flat_map(|child| {
+                let borrow = child.borrow();
+                if borrow.name.local_name == tag {
+                    Some(child.clone())
+                } else {
+                    borrow.find(tag)
+                }
+            })
+            .next()
     }
 
     /// Finds all children of the current node with the given tag.
     pub fn find_all_children(&self, tag: &str) -> Vec<ChildNodeRef> {
         let mut result = Vec::new();
 
-        for c in self.childs.iter() {
+        for c in self.children.iter() {
             if c.borrow().name.local_name == tag {
                 result.push(c.clone());
             } else {
@@ -221,13 +187,13 @@ impl XMLNode {
 
 impl fmt::Display for XMLNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let childs: String = self.childs.iter().fold(String::from(""), |sum, x| {
+        let childs: String = self.children.iter().fold(String::new(), |sum, x| {
             sum + &format!("{}", *x.borrow()) + "\n\t"
         });
         let attrs: String = self
             .attrs
             .iter()
-            .fold(String::from(""), |sum, x| sum + &x.name.local_name + ", ");
+            .fold(String::new(), |sum, x| sum + &x.name.local_name + ", ");
 
         let t = self.text.as_ref();
         let mut text = String::from("");
@@ -260,9 +226,8 @@ where
             .create_writer(&mut b);
 
         for e in reader {
-            match e {
-                ev @ Ok(ReaderEvent::StartElement { .. }) => {
-                    let ev = ev.unwrap();
+            match e? {
+                ev @ ReaderEvent::StartElement { .. } => {
                     let mut attrs: Vec<xml::attribute::OwnedAttribute> = vec![];
 
                     if let Some(WriterEvent::StartElement {
@@ -287,18 +252,13 @@ where
                         writer.write(w)?;
                     }
                 }
-                Ok(ReaderEvent::EndElement { .. }) => {
+                ReaderEvent::EndElement { .. } => {
                     writer.write(WriterEvent::end_element())?;
                 }
-                ev @ Ok(_) => {
-                    if let Some(e) = ev?.as_writer_event() {
+                ev => {
+                    if let Some(e) = ev.as_writer_event() {
                         writer.write(e)?;
                     }
-                }
-                Err(err) => {
-                    return Err(XMLError {
-                        error: String::from(err.msg()),
-                    })
                 }
             }
         }

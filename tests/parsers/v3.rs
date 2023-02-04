@@ -27,8 +27,8 @@ fn correct_cover() {
     let doc = EpubDoc::new(input_file).unwrap();
 
     assert!(
-        doc.get_cover_id().is_ok(),
-        "Error on cover id:\n{:#?}",
+        doc.get_cover_id().is_some(),
+        "Error on cover id: {:#?}",
         doc.get_cover_id()
     );
 
