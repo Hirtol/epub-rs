@@ -92,6 +92,7 @@ impl EpubParser for EpubV2Parser {
                 .metadata
                 .get("cover")
                 .and_then(|i| i.get(0))
+                .filter(|i| epub.resources.contains_key(&i.content))
                 .map(|i| i.content.to_string());
         }
 
