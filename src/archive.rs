@@ -37,7 +37,7 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the zip is broken.
-    pub fn from_reader(reader: R) -> Result<EpubArchive<R>, ArchiveError> {
+    pub fn from_reader(reader: R) -> Result<Self> {
         let zip = zip::ZipArchive::new(reader)?;
 
         Ok(EpubArchive { zip })
@@ -48,8 +48,8 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the name doesn't exists in the zip archive.
-    pub fn get_entry(&mut self, name: impl AsRef<Path>) -> Result<Vec<u8>, ArchiveError> {
-        let mut entry: Vec<u8> = Vec::new();
+    pub fn get_entry(&mut self, name: impl AsRef<Path>) -> Result<Vec<u8>> {
+        let mut entry = Vec::new();
         let path = name.as_ref();
         let name = path.to_string_lossy();
 
@@ -76,7 +76,7 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the name doesn't exists in the zip archive.
-    pub fn get_entry_as_str<P: AsRef<Path>>(&mut self, name: P) -> Result<String, ArchiveError> {
+    pub fn get_entry_as_str(&mut self, name: impl AsRef<Path>) -> Result<String> {
         let content = self.get_entry(name)?;
         String::from_utf8(content).map_err(ArchiveError::from)
     }
@@ -86,7 +86,7 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the epub doesn't have the container file.
-    pub fn get_container_file(&mut self) -> Result<Vec<u8>, ArchiveError> {
+    pub fn get_container_file(&mut self) -> Result<Vec<u8>> {
         self.get_entry("META-INF/container.xml")
     }
 }

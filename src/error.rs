@@ -12,6 +12,8 @@ pub enum ArchiveError {
     Utf8(#[from] std::str::Utf8Error),
     #[error("Invalid XML error: {0}")]
     Xml(#[from] xmlutils::XMLError),
+    #[error("Invalid XML error: {0}")]
+    XmlDom(#[from] roxmltree::Error),
     #[error("Parsing of this epub failed")]
     ParsingFailure,
     #[error("An invalid ID was provided")]

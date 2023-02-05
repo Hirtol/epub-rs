@@ -3,9 +3,7 @@ use std::path::Path;
 
 #[test]
 fn doc_open() {
-    let doc = EpubDoc::new("test.epub");
-    assert!(doc.is_ok());
-    let doc = doc.unwrap();
+    let doc = EpubDoc::new("test.epub").unwrap();
     let doc2 = EpubDoc::new("tests/docs/Metamorphosis-jackson.epub").unwrap();
     assert_eq!(Path::new("OEBPS"), doc.root_base);
     assert_eq!(Path::new("OEBPS/content.opf"), doc.root_file);

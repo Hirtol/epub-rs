@@ -8,13 +8,9 @@ use crate::archive::EpubArchive;
 use crate::doc::{MetadataNode, NavPoint, ResourceItem};
 use crate::error::Result;
 use crate::utils;
-use crate::xmlutils::XMLNode;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::path::Path;
-
-type RootXml = RefCell<XMLNode>;
 
 pub(crate) mod v2;
 pub(crate) mod v3;
@@ -28,7 +24,7 @@ pub trait EpubParser {
     fn parse<R: Read + Seek, PATH: AsRef<Path>>(
         epub: &mut EpubMetadata,
         root_base: PATH,
-        xml: &RootXml,
+        xml: &roxmltree::Document<'_>,
         archive: &mut EpubArchive<R>,
     ) -> Result<()>;
 }
@@ -69,11 +65,11 @@ impl EpubMetadata {
     pub(crate) fn insert_resource(
         &mut self,
         root_base: impl AsRef<Path>,
-        item: &XMLNode,
+        item: &roxmltree::Node<'_, '_>,
     ) -> Option<()> {
-        let id = item.get_attr("id")?;
-        let href = item.get_attr("href")?;
-        let mtype = item.get_attr("media-type")?;
+        let id = item.attribute("id")?;
+        let href = item.attribute("href")?;
+        let mtype = item.attribute("media-type")?;
         let path = utils::convert_path_separators(root_base, href);
 
         self.resources.insert(
@@ -81,7 +77,7 @@ impl EpubMetadata {
             ResourceItem {
                 path,
                 mime: mtype.to_string(),
-                property: item.get_attr("properties").map(Into::into),
+                property: item.attribute("properties").map(Into::into),
             },
         );
 

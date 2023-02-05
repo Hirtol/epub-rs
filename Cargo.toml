@@ -1,5 +1,5 @@
 [package]
-authors = ["Daniel García Moreno <danigm@wadobo.com>"]
+authors = ["Daniel García Moreno <danigm@wadobo.com>", "Hirtol <epub@hirtol.top>"]
 description = """
 Library to support the reading of epub files.
 """
@@ -21,6 +21,9 @@ xml-rs = "0.8.3"
 zip = { version = "0.6.4", default-features = false, features = ["deflate", "bzip2"]}
 percent-encoding = "2.1.0"
 thiserror = "1.0.38"
+encoding_rs = "0.8.32"
+roxmltree = "0.18.0"
+lol_html = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.3.5"

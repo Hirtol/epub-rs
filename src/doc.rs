@@ -3,6 +3,8 @@
 //! Provides easy methods to navigate through the epub content, cover,
 //! chapters, etc.
 
+use roxmltree::StringStorage;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -10,6 +12,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use crate::archive::EpubArchive;
 use crate::error::{ArchiveError, Result};
@@ -18,7 +21,7 @@ use crate::parsers::{EpubMetadata, EpubParser};
 use crate::parsers::v2::EpubV2Parser;
 use crate::parsers::v3::EpubV3Parser;
 use crate::xmlutils;
-use crate::xmlutils::XMLNode;
+use crate::xmlutils::XMLError;
 
 /// Struct that represent a navigation point in a table of content
 #[derive(Debug, Eq, Clone)]
@@ -71,7 +74,19 @@ pub struct MetadataNode {
     /// The textual content that was within the XML open and close tags
     pub content: String,
     /// The attributes of the XML node
-    pub attr: Vec<xml::attribute::OwnedAttribute>,
+    pub attr: Vec<OwnedAttribute>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedAttribute {
+    pub name: OwnedName,
+    pub value: Arc<str>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedName {
+    pub namespace: Option<String>,
+    pub name: String,
 }
 
 impl MetadataNode {
@@ -82,10 +97,23 @@ impl MetadataNode {
         }
     }
 
-    pub fn from_attr(content: impl Into<String>, attr: &XMLNode) -> MetadataNode {
+    pub fn from_attr(content: impl Into<String>, attr: &roxmltree::Node) -> MetadataNode {
+        let attrs = attr
+            .attributes()
+            .map(|atr| OwnedAttribute {
+                name: OwnedName {
+                    namespace: atr.namespace().map(|r| r.to_owned()),
+                    name: atr.name().to_owned(),
+                },
+                value: match atr.value_storage() {
+                    StringStorage::Borrowed(val) => (*val).into(),
+                    StringStorage::Owned(val) => val.clone(),
+                },
+            })
+            .collect();
         MetadataNode {
             content: content.into(),
-            attr: attr.attrs.clone(),
+            attr: attrs,
         }
     }
 
@@ -97,8 +125,8 @@ impl MetadataNode {
     pub fn find_attr(&self, name: &str) -> Option<&str> {
         self.attr
             .iter()
-            .find(|a| a.name.local_name == name)
-            .map(|a| a.value.as_str())
+            .find(|a| a.name.name == name)
+            .map(|a| a.value.as_ref())
     }
 }
 
@@ -175,7 +203,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         let resources = HashMap::new();
 
         let container = archive.get_container_file()?;
-        let root_file = get_root_file(container)?;
+        let root_file = get_root_file(&container)?;
         let base_path = root_file.parent().expect("All files have a parent");
 
         let mut doc = EpubDoc {
@@ -281,7 +309,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     pub fn get_cover(&self) -> Option<Vec<u8>> {
         let cover_id = self.get_cover_id()?;
 
-        let cover_data = self.get_resource(&cover_id)?;
+        let cover_data = self.get_resource(cover_id)?;
         Some(cover_data)
     }
 
@@ -390,8 +418,7 @@ impl<R: Read + Seek> EpubDoc<R> {
 
         self.context
             .resources
-            .iter()
-            .map(|(_, data)| data)
+            .values()
             .filter(|data| data.path == path)
             .map(|data| data.mime.as_str())
             .next()
@@ -423,19 +450,34 @@ impl<R: Read + Seek> EpubDoc<R> {
             .get(spine_id)
             .ok_or(ArchiveError::InvalidId)?
             .path;
-        let current = self.get_resource_by_path(path)?;
+        let html = self.get_resource_by_path(path)?;
+        let content = xmlutils::ensure_utf8(&html);
 
-        let resp = xmlutils::replace_attrs(current.as_slice(), |element, attr, value| {
-            match (element, attr) {
-                ("link", "href") => build_epub_uri(path, url_prepend, value),
-                ("img", "src") => build_epub_uri(path, url_prepend, value),
-                ("image", "href") => build_epub_uri(path, url_prepend, value),
-                ("a", "href") => build_epub_uri(path, url_prepend, value),
-                _ => String::from(value),
-            }
-        })?;
+        let settings = lol_html::Settings {
+            element_content_handlers: vec![
+                lol_html::element!("a[href], link[href], image[href]", |el| {
+                    let current_val = el.get_attribute("href").ok_or(XMLError::NoElements)?;
+                    let href = build_epub_uri(path, url_prepend, &current_val);
 
-        Ok(resp)
+                    el.set_attribute("href", &href)?;
+
+                    Ok(())
+                }),
+                lol_html::element!("img[src]", |el| {
+                    let current_val = el.get_attribute("src").ok_or(XMLError::NoElements)?;
+                    let href = build_epub_uri(path, url_prepend, &current_val);
+
+                    el.set_attribute("src", &href)?;
+
+                    Ok(())
+                }),
+            ],
+            strict: false,
+            ..lol_html::Settings::default()
+        };
+        let response = xmlutils::replace_attributes(&content, settings)?;
+
+        Ok(response)
     }
 
     /// Returns the number of chapters
@@ -476,10 +518,11 @@ impl<R: Read + Seek> EpubDoc<R> {
     fn fill_resources(&mut self) -> Result<()> {
         let mut archive = self.archive.borrow_mut();
         let root_container = archive.get_entry(&self.root_file)?;
-        let root = xmlutils::XMLReader::parse(root_container.as_slice())?;
-        let root_borrow = root.borrow();
-        let epub_version = root_borrow
-            .get_attr("version")
+        let txt = xmlutils::ensure_utf8(&root_container);
+        let root = roxmltree::Document::parse(&txt)?;
+        let epub_version = root
+            .root_element()
+            .attribute("version")
             .ok_or(ArchiveError::ParsingFailure)?;
 
         match epub_version {
@@ -491,8 +534,7 @@ impl<R: Read + Seek> EpubDoc<R> {
                 // Always assume it's a V3 epub
                 // Parse with the V2 parser, followed by the V3 parser
                 EpubV2Parser::parse(&mut self.context, &self.root_base, &root, &mut archive)?;
-                let _ =
-                    EpubV3Parser::parse(&mut self.context, &self.root_base, &root, &mut archive)?;
+                EpubV3Parser::parse(&mut self.context, &self.root_base, &root, &mut archive)?;
             }
         }
 
@@ -500,23 +542,24 @@ impl<R: Read + Seek> EpubDoc<R> {
     }
 }
 
-fn get_root_file(container: Vec<u8>) -> Result<PathBuf, ArchiveError> {
-    let root = xmlutils::XMLReader::parse(container.as_slice())?;
-    let el = root.borrow();
-    let element = el.find("rootfile").ok_or(ArchiveError::ParsingFailure)?;
-    let el2 = element.borrow();
-
-    let attr = el2
-        .get_attr("full-path")
+fn get_root_file(content: &[u8]) -> Result<PathBuf, ArchiveError> {
+    let txt = xmlutils::ensure_utf8(content);
+    let root = roxmltree::Document::parse(&txt)?;
+    let element = root
+        .descendants()
+        .find(|r| r.has_tag_name("rootfile"))
+        .ok_or(ArchiveError::ParsingFailure)?;
+    let attr = element
+        .attribute("full-path")
         .ok_or(ArchiveError::ParsingFailure)?;
 
     Ok(PathBuf::from(attr))
 }
 
-fn build_epub_uri<P: AsRef<Path>>(path: P, url_prepend: &str, append: &str) -> String {
+fn build_epub_uri<'a>(path: impl AsRef<Path>, url_prepend: &str, append: &'a str) -> Cow<'a, str> {
     // allowing external links
     if append.starts_with("http") {
-        return String::from(append);
+        return append.into();
     }
 
     let path = path.as_ref();
@@ -543,5 +586,5 @@ fn build_epub_uri<P: AsRef<Path>>(path: P, url_prepend: &str, append: &str) -> S
         cpath.display().to_string()
     };
 
-    format!("{url_prepend}{path}")
+    format!("{url_prepend}{path}").into()
 }
