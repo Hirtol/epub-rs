@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum XMLError {
@@ -44,4 +45,16 @@ pub fn replace_attributes(html: &str, settings: lol_html::Settings) -> Result<Ve
     rewriter.end()?;
 
     Ok(output)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedAttribute {
+    pub name: OwnedName,
+    pub value: Arc<str>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedName {
+    pub namespace: Option<String>,
+    pub tag: String,
 }

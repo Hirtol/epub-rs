@@ -3,6 +3,9 @@
 //! Provides easy methods to navigate through the epub content, cover,
 //! chapters, etc.
 
+use crate::archive::EpubArchive;
+use crate::error::{ArchiveError, Result};
+use crate::parsers::{EpubMetadata, EpubParser};
 use roxmltree::StringStorage;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -12,16 +15,11 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
-
-use crate::archive::EpubArchive;
-use crate::error::{ArchiveError, Result};
-use crate::parsers::{EpubMetadata, EpubParser};
 
 use crate::parsers::v2::EpubV2Parser;
 use crate::parsers::v3::EpubV3Parser;
 use crate::xmlutils;
-use crate::xmlutils::XMLError;
+use crate::xmlutils::{OwnedAttribute, OwnedName, XMLError};
 
 /// Struct that represent a navigation point in a table of content
 #[derive(Debug, Eq, Clone)]
@@ -77,18 +75,6 @@ pub struct MetadataNode {
     pub attr: Vec<OwnedAttribute>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct OwnedAttribute {
-    pub name: OwnedName,
-    pub value: Arc<str>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OwnedName {
-    pub namespace: Option<String>,
-    pub name: String,
-}
-
 impl MetadataNode {
     pub fn from_content(content: impl Into<String>) -> MetadataNode {
         MetadataNode {
@@ -97,15 +83,15 @@ impl MetadataNode {
         }
     }
 
-    pub fn from_attr(content: impl Into<String>, attr: &roxmltree::Node) -> MetadataNode {
-        let attrs = attr
+    pub fn from_attr(content: impl Into<String>, node: &roxmltree::Node) -> MetadataNode {
+        let attrs = node
             .attributes()
-            .map(|atr| OwnedAttribute {
+            .map(|attr| OwnedAttribute {
                 name: OwnedName {
-                    namespace: atr.namespace().map(|r| r.to_owned()),
-                    name: atr.name().to_owned(),
+                    namespace: attr.namespace().map(|r| r.to_owned()),
+                    tag: attr.name().to_owned(),
                 },
-                value: match atr.value_storage() {
+                value: match attr.value_storage() {
                     StringStorage::Borrowed(val) => (*val).into(),
                     StringStorage::Owned(val) => val.clone(),
                 },
@@ -125,7 +111,7 @@ impl MetadataNode {
     pub fn find_attr(&self, name: &str) -> Option<&str> {
         self.attr
             .iter()
-            .find(|a| a.name.name == name)
+            .find(|a| a.name.tag == name)
             .map(|a| a.value.as_ref())
     }
 }
