@@ -164,7 +164,11 @@ impl EpubV2Parser {
         let label = item
             .descendants()
             .find(|r| r.has_tag_name("navLabel"))
-            .and_then(|l| l.first_child().and_then(|t| t.text()).map(|t| t.to_owned()))?;
+            .and_then(|l| {
+                l.first_element_child()
+                    .and_then(|t| t.text())
+                    .map(|t| t.to_owned())
+            })?;
 
         if let Some(href) = utils::percent_decode(&content.to_string_lossy()) {
             let navpoint = NavPoint {

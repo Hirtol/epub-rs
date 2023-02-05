@@ -71,6 +71,9 @@ fn toc_test() {
     let doc = doc.unwrap();
 
     assert!(!doc.context.toc.is_empty());
+
+    assert_eq!(doc.get_toc().get(2).unwrap().label, "Vestidor");
+
     for nav in doc.context.toc.iter() {
         let chapter = doc.resource_uri_to_chapter(&nav.content);
         assert!(chapter.is_some());
