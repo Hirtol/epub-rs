@@ -72,7 +72,7 @@ impl EpubParser for EpubV2Parser {
                 {
                     if let Some(id) = item.attribute("id") {
                         if &id == unique_identifier_id.as_ref().unwrap() {
-                            epub.unique_identifier = Some(v.to_string());
+                            epub.unique_identifier = Some(v.clone());
                         }
                     }
                 }

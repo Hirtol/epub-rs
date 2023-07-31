@@ -56,7 +56,7 @@ impl PartialEq for NavPoint {
 /// It is guaranteed to have a path within the Epub, and a mime type.
 ///
 /// Optionally it can contain a property attribute, [see here](https://www.w3.org/publishing/epub3/epub-packages.html#sec-item-property-values).
-/// Note that `cover-image` and `nav` properties are handled already in the Epub V3 parsing.
+/// Note that `cover-image` and `nav` properties are already handled in the Epub V3 parsing.
 /// See [EpubDoc::get_cover] and [EpubDoc::get_toc] for more information.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceItem {
