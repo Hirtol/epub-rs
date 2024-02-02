@@ -61,7 +61,7 @@ fn fill_toc<R: Read + Seek, PATH: AsRef<Path>>(
 
     let toc_xml = archive.get_entry(&toc_res.path).ok()?;
     let txt = crate::xmlutils::ensure_utf8(&toc_xml);
-    let root = roxmltree::Document::parse(&txt).ok()?;
+    let root = crate::xmlutils::parse_xml(&txt).ok()?;
 
     let mut navs = root.descendants().filter(|r| r.has_tag_name("nav"));
 

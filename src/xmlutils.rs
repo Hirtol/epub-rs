@@ -36,6 +36,17 @@ pub fn ensure_utf8(content: &[u8]) -> Cow<'_, str> {
     out
 }
 
+/// Parse the given XML content with permissive options
+pub fn parse_xml(content: &str) -> Result<roxmltree::Document, roxmltree::Error> {
+    roxmltree::Document::parse_with_options(
+        content,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            nodes_limit: u32::MAX,
+        },
+    )
+}
+
 pub fn replace_attributes(html: &str, settings: lol_html::Settings) -> Result<Vec<u8>, XMLError> {
     let mut output = Vec::with_capacity(html.len());
     let mut rewriter =

@@ -505,7 +505,7 @@ impl<R: Read + Seek> EpubDoc<R> {
         let mut archive = self.archive.borrow_mut();
         let root_container = archive.get_entry(&self.root_file)?;
         let txt = xmlutils::ensure_utf8(&root_container);
-        let root = roxmltree::Document::parse(&txt)?;
+        let root = crate::xmlutils::parse_xml(&txt)?;
         let epub_version = root
             .root_element()
             .attribute("version")
@@ -530,7 +530,7 @@ impl<R: Read + Seek> EpubDoc<R> {
 
 fn get_root_file(content: &[u8]) -> Result<PathBuf, ArchiveError> {
     let txt = xmlutils::ensure_utf8(content);
-    let root = roxmltree::Document::parse(&txt)?;
+    let root = crate::xmlutils::parse_xml(&txt)?;
     let element = root
         .descendants()
         .find(|r| r.has_tag_name("rootfile"))
